@@ -302,7 +302,7 @@ For vector search, the user additionally needs:
 
 Postgres uses `pg_trgm` GIN index for fast fuzzy matching. SQLite doesn't have this. Options:
 
-1. **LIKE with wildcards.** `WHERE slug LIKE '%pedro%franc%'`. Simple, works for partial matches, but no ranking.
+1. **LIKE with wildcards.** `WHERE slug LIKE '%dont%scale%'`. Simple, works for partial matches, but no ranking.
 2. **Levenshtein distance via UDF.** Load a user-defined function (or implement in TS) that computes edit distance. Sort by distance. Slower but more accurate.
 3. **Trigram simulation in TS.** Compute trigrams in TypeScript, store in a separate table, query by trigram overlap. Fast but requires maintaining the trigram index.
 

@@ -16,9 +16,9 @@ export interface ParsedMarkdown {
  *
  * Structure:
  *   ---
- *   type: person
- *   title: Pedro Franceschi
- *   tags: [founder, fintech]
+ *   type: concept
+ *   title: Do Things That Don't Scale
+ *   tags: [startups, growth]
  *   ---
  *   Compiled truth content here...
  *   ---

@@ -4,38 +4,38 @@ import { parseMarkdown, serializeMarkdown, splitBody } from '../src/core/markdow
 describe('Markdown Parser', () => {
   test('parses frontmatter + compiled_truth + timeline', () => {
     const md = `---
-type: person
-title: Pedro Franceschi
-tags: [founder, fintech]
+type: concept
+title: Do Things That Don't Scale
+tags: [startups, growth]
 ---
 
-Pedro is the co-founder of Brex.
+Paul Graham argues that startups should do unscalable things early on.
 
 ---
 
-- 2024-01-15: Met at dinner
-- 2024-03-20: Brex Series D
+- 2013-07-01: Published on paulgraham.com
+- 2024-11-15: Referenced in batch kickoff talk
 `;
     const parsed = parseMarkdown(md);
-    expect(parsed.type).toBe('person');
-    expect(parsed.title).toBe('Pedro Franceschi');
-    expect(parsed.tags).toEqual(['founder', 'fintech']);
-    expect(parsed.compiled_truth).toContain('co-founder of Brex');
-    expect(parsed.timeline).toContain('Met at dinner');
-    expect(parsed.timeline).toContain('Brex Series D');
+    expect(parsed.type).toBe('concept');
+    expect(parsed.title).toBe("Do Things That Don't Scale");
+    expect(parsed.tags).toEqual(['startups', 'growth']);
+    expect(parsed.compiled_truth).toContain('unscalable things');
+    expect(parsed.timeline).toContain('Published on paulgraham.com');
+    expect(parsed.timeline).toContain('batch kickoff talk');
   });
 
   test('handles no timeline separator', () => {
     const md = `---
-type: company
-title: Brex
+type: concept
+title: Superlinear Returns
 ---
 
-Brex is a fintech company.
-They do corporate cards.
+Returns in many fields are superlinear.
+Performance compounds over time.
 `;
     const parsed = parseMarkdown(md);
-    expect(parsed.compiled_truth).toContain('fintech company');
+    expect(parsed.compiled_truth).toContain('superlinear');
     expect(parsed.timeline).toBe('');
   });
 
@@ -52,7 +52,7 @@ title: Empty Page
 
   test('removes type, title, tags from frontmatter object', () => {
     const md = `---
-type: person
+type: concept
 title: Test
 tags: [a, b]
 custom_field: hello
@@ -79,13 +79,13 @@ Content
 
   test('infers slug from file path', () => {
     const md = `---
-type: person
+type: concept
 title: Test
 ---
 Content
 `;
-    const parsed = parseMarkdown(md, 'people/pedro-franceschi.md');
-    expect(parsed.slug).toBe('people/pedro-franceschi');
+    const parsed = parseMarkdown(md, 'concepts/do-things-that-dont-scale.md');
+    expect(parsed.slug).toBe('concepts/do-things-that-dont-scale');
   });
 });
 
@@ -115,19 +115,19 @@ describe('splitBody', () => {
 describe('serializeMarkdown', () => {
   test('round-trips through parse and serialize', () => {
     const original = `---
-type: person
-title: Pedro Franceschi
+type: concept
+title: Do Things That Don't Scale
 tags:
-  - founder
-  - fintech
+  - startups
+  - growth
 custom: value
 ---
 
-Pedro is the co-founder of Brex.
+Paul Graham argues that startups should do unscalable things early on.
 
 ---
 
-- 2024-01-15: Met at dinner
+- 2013-07-01: Published on paulgraham.com
 `;
     const parsed = parseMarkdown(original);
     const serialized = serializeMarkdown(

@@ -18,11 +18,11 @@ There's already a production-grade RAG system (Ruby on Rails, Postgres + pgvecto
 
 ```
 +--------------------------------------------------+
-|  Page: people/pedro-franceschi                    |
+|  Page: concepts/do-things-that-dont-scale         |
 |                                                   |
 |  --- frontmatter (YAML) ---                       |
-|  type: person                                     |
-|  tags: [founder, fintech]                         |
+|  type: concept                                    |
+|  tags: [startups, growth, pg-essay]               |
 |                                                   |
 |  === COMPILED TRUTH ===                           |
 |  Current best understanding.                      |
@@ -33,8 +33,8 @@ There's already a production-grade RAG system (Ruby on Rails, Postgres + pgvecto
 |                                                   |
 |  === TIMELINE ===                                 |
 |  Append-only evidence trail.                      |
-|  - 2024-01-15: Met at dinner, discussed...        |
-|  - 2024-03-20: Brex announced Series D...         |
+|  - 2013-07-01: Published on paulgraham.com        |
+|  - 2024-11-15: Referenced in batch kickoff talk   |
 |  Never edited, only appended.                     |
 +--------------------------------------------------+
           |                    |
@@ -139,9 +139,9 @@ clawhub install gbrain
 #    - Brain is ready
 
 # 3. From OpenClaw, brain tools are now available:
-#    "What do we know about River AI?"
+#    "What essays do we have about startups?"
 #    "Ingest my meeting notes from today"
-#    "Who knows Jensen Huang?"
+#    "What does PG say about doing things that don't scale?"
 ```
 
 Behind the scenes, `clawhub install gbrain`:
@@ -174,7 +174,7 @@ gbrain import /path/to/markdown/wiki/
 # ~30s for text import, ~10-15 min for embedding
 
 # 4. Query
-gbrain query "who knows Jensen Huang?"
+gbrain query "what does PG say about doing things that don't scale?"
 ```
 
 ### Path 3: MCP user (Claude Code, Cursor)
@@ -337,14 +337,14 @@ Indexes:
 ## Search architecture
 
 ```
-Query: "who knows Jensen Huang?"
+Query: "when should you ignore conventional wisdom?"
            |
            v
 +---------------------+
 | Multi-query expansion|
 | (Claude Haiku)       |
-| "Jensen Huang connections"
-| "people who know Jensen"
+| "contrarian thinking"
+| "going against the crowd"
 +---------------------+
      |   |   |
      v   v   v
@@ -418,7 +418,7 @@ Each skill is a markdown file that AI agents (Claude Code, OpenClaw) read and fo
 ## CEO scope expansions (accepted for v0)
 
 1. **CLI/MCP parity with drift tests.** Both interfaces are thin wrappers over the engine. Tests assert identical output.
-2. **Smart slug resolution.** Fuzzy matching via pg_trgm for reads. Writes require exact slugs. `gbrain get "pedro fran"` resolves to `people/pedro-franceschi`.
+2. **Smart slug resolution.** Fuzzy matching via pg_trgm for reads. Writes require exact slugs. `gbrain get "dont scale"` resolves to `concepts/do-things-that-dont-scale`.
 3. **Brain health dashboard.** `gbrain health` shows page count, embed coverage, stale pages, orphans, dead links.
 4. **Normalized timeline.** `timeline_entries` table only (no TEXT column). `detail` field supports markdown.
 5. **Page version control.** `page_versions` table stores full snapshots (compiled_truth + frontmatter + links + tags). `gbrain history`, `gbrain diff`, `gbrain revert` commands. Revert re-chunks and re-embeds.
@@ -497,7 +497,7 @@ The CLI connects directly to Supabase Postgres. Trigger.dev and Vercel are for a
 
 1. `gbrain import /data/brain/` migrates all 7,471 files losslessly
 2. `gbrain export` round-trips to semantically identical markdown
-3. `gbrain query "who knows Jensen Huang?"` returns relevant hybrid search results
+3. `gbrain query "what does PG say about doing things that don't scale?"` returns relevant hybrid search results
 4. `gbrain serve` starts MCP server connectable by Claude Code
 5. All 3 chunkers produce correct output with test fixtures
 6. `gbrain init --supabase` works end-to-end

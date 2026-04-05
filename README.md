@@ -3,20 +3,62 @@
 Open source personal knowledge brain. Postgres + pgvector + hybrid search that actually works.
 
 ```bash
-gbrain query "who knows Jensen Huang?"
+gbrain query "what does Paul Graham say about doing things that don't scale?"
 ```
 
-Returns ranked results with evidence chains from your compiled intelligence pages, cross-referenced across 7,000+ entity pages in under 50ms.
+```
+concepts/do-things-that-dont-scale (concept) score=0.0312
+  The most common unscalable thing founders have to do at the start is to
+  recruit users manually. Nearly all startups have to...
+
+concepts/how-to-get-startup-ideas (concept) score=0.0298
+  The way to get startup ideas is not to try to think of startup ideas.
+  It's to look for problems, preferably problems you have yourself...
+
+concepts/relentlessly-resourceful (concept) score=0.0251
+  Not merely relentless. That's not enough to make things go your way
+  except in a few mostly uninteresting domains. In any interesting domain...
+```
+
+Hybrid search finds essays by meaning, not just keywords. "Doing things that don't scale" matches even when the exact phrase doesn't appear. That's the point.
 
 ## Why this exists
 
-You have a brain full of knowledge about people, companies, deals, projects. It lives in markdown files, meeting notes, CRM exports, Obsidian vaults, Notion databases. It's scattered, unsearchable, and going stale.
+You have a brain full of knowledge. It lives in markdown files, meeting notes, CRM exports, Obsidian vaults, Notion databases. It's scattered, unsearchable, and going stale.
 
-Search is the bottleneck. Keyword search misses semantic matches. Vector search misses exact names. Neither understands that the person you met at dinner last week works at the company you're evaluating for a deal.
+Search is the bottleneck. Keyword search misses semantic matches. Vector search misses exact names and phrases. Neither connects related ideas across documents.
 
 GBrain fixes this with hybrid search that combines both approaches, plus a knowledge model that treats every page like an intelligence assessment: compiled truth on top (your current best understanding, rewritten when evidence changes), append-only timeline on the bottom (the evidence trail that never gets edited).
 
-AI agents maintain the brain. You ingest a meeting and the agent updates every person and company mentioned, creates cross-reference links, and appends timeline entries. MCP clients query it. The intelligence lives in fat markdown skills, not application code.
+AI agents maintain the brain. You ingest a document and the agent updates every entity mentioned, creates cross-reference links, and appends timeline entries. MCP clients query it. The intelligence lives in fat markdown skills, not application code.
+
+## Try it: Paul Graham's essays in 90 seconds
+
+GBrain ships with 10 Paul Graham essays as a kindling corpus. After setup, they're already in your brain:
+
+```bash
+# What's in there?
+gbrain stats
+# Pages: 10, Chunks: 47, Embedded: 47, Links: 0
+
+# Keyword search (fast, exact matches)
+gbrain search "startups"
+
+# Hybrid search (the good one, semantic + keyword + expansion)
+gbrain query "what makes a great founder?"
+
+# Read a specific essay
+gbrain get concepts/do-things-that-dont-scale
+
+# Find essays related to a concept
+gbrain query "when should you ignore conventional wisdom?"
+
+# Check brain health
+gbrain health
+# Pages: 10, Embed coverage: 100%, Stale: 0, Orphans: 10
+```
+
+The essays are just the demo. The real power is when you import your own knowledge, thousands of pages about people, companies, projects, and the connections between them.
 
 ## Install
 
@@ -59,9 +101,8 @@ OpenClaw will install the package, walk through the Supabase connection wizard, 
 After setup, you talk to your brain through OpenClaw:
 
 ```
-You: "What do we know about River AI?"
+You: "What essays do we have about startups?"
 You: "Ingest my meeting notes from today"
-You: "Who is connected to Jensen Huang?"
 You: "Give me a briefing for my meetings tomorrow"
 You: "Import my Obsidian vault into the brain"
 ```
@@ -110,7 +151,7 @@ The init wizard:
 1. Checks for Supabase CLI, offers auto-provisioning
 2. Falls back to manual connection URL if CLI isn't available
 3. Runs the full schema migration (tables, indexes, triggers, extensions)
-4. Imports a kindling corpus (10 PG essays) as demo data
+4. Imports the kindling corpus (10 PG essays) as demo data
 5. Verifies the connection and prints your first query to try
 
 Config is saved to `~/.gbrain/config.json` with 0600 permissions.
@@ -138,32 +179,37 @@ Every page in the brain follows the compiled truth + timeline pattern:
 
 ```markdown
 ---
-type: person
-title: Pedro Franceschi
-tags: [founder, fintech]
+type: concept
+title: Do Things That Don't Scale
+tags: [startups, growth, pg-essay]
 ---
 
-Co-founder and CEO of Brex. Previously built a payments company in Brazil
-at age 16. Strong technical founder with deep fintech expertise.
+Paul Graham's argument that startups should do unscalable things early on.
+The most common: recruiting users manually, one at a time. Airbnb went
+door to door in New York photographing apartments. Stripe manually
+installed their payment integration for early users.
+
+The key insight: the unscalable effort teaches you what users actually
+want, which you can't learn any other way.
 
 ---
 
-- 2024-03-20: Brex announced Series D at $12B valuation
-- 2024-01-15: Met at dinner, discussed expansion into expense management
-- 2023-09-01: Brex hit $1B ARR
+- 2013-07-01: Published on paulgraham.com
+- 2024-11-15: Referenced in batch W25 kickoff talk
+- 2025-02-20: Cited in discussion about AI agent onboarding strategies
 ```
 
 Above the `---` separator: **compiled truth**. Your current best understanding. Gets rewritten when new evidence changes the picture. Below: **timeline**. Append-only evidence trail. Never edited, only added to.
 
-This is the Karpathy-style intelligence assessment model. The compiled truth is the answer. The timeline is the proof.
+The compiled truth is the answer. The timeline is the proof.
 
 ## How search works
 
 ```
-Query: "who knows Jensen Huang?"
+Query: "when should you ignore conventional wisdom?"
          |
     Multi-query expansion (Claude Haiku)
-    "Jensen Huang connections", "people who know Jensen"
+    "contrarian thinking startups", "going against the crowd"
          |
     +----+----+
     |         |
@@ -186,7 +232,7 @@ Query: "who knows Jensen Huang?"
     Results
 ```
 
-Keyword search alone misses "Jensen Huang" when the page says "CEO of NVIDIA." Vector search alone misses exact name matches when the embedding is diluted by surrounding text. RRF fusion gets both right. Multi-query expansion catches phrasings you didn't think of.
+Keyword search alone misses conceptual matches. "Ignore conventional wisdom" won't find an essay titled "The Bus Ticket Theory of Genius" even though it's exactly about that. Vector search alone misses exact phrases when the embedding is diluted by surrounding text. RRF fusion gets both right. Multi-query expansion catches phrasings you didn't think of.
 
 ## Database schema
 
@@ -194,7 +240,7 @@ Keyword search alone misses "Jensen Huang" when the page says "CEO of NVIDIA." V
 
 ```
 pages                    The core content table
-  slug (UNIQUE)          e.g. "people/pedro-franceschi"
+  slug (UNIQUE)          e.g. "concepts/do-things-that-dont-scale"
   type                   person, company, deal, yc, civic, project, concept, source, media
   title, compiled_truth, timeline
   frontmatter (JSONB)    Arbitrary metadata
@@ -210,7 +256,7 @@ content_chunks           Chunked content with embeddings
 
 links                    Cross-references between pages
   from_page_id, to_page_id
-  link_type              knows, invested_in, works_at, founded, etc.
+  link_type              knows, invested_in, works_at, founded, references, etc.
 
 tags                     page_id + tag (many-to-many)
 
@@ -302,25 +348,25 @@ await engine.connect({ database_url: process.env.DATABASE_URL });
 await engine.initSchema();
 
 // Write a page
-await engine.putPage('people/pedro', {
-  type: 'person',
-  title: 'Pedro Franceschi',
-  compiled_truth: 'Co-founder and CEO of Brex...',
-  timeline: '- 2024-01-15: Met at dinner...',
+await engine.putPage('concepts/superlinear-returns', {
+  type: 'concept',
+  title: 'Superlinear Returns',
+  compiled_truth: 'Paul Graham argues that returns in many fields are superlinear...',
+  timeline: '- 2023-10-01: Published on paulgraham.com',
 });
 
 // Hybrid search
-const results = await engine.searchKeyword('fintech founders');
+const results = await engine.searchKeyword('startup growth');
 
 // Typed links
-await engine.addLink('people/pedro', 'companies/brex', '', 'founded');
+await engine.addLink('concepts/superlinear-returns', 'concepts/do-things-that-dont-scale', '', 'references');
 
 // Graph traversal
-const graph = await engine.traverseGraph('people/pedro', 3);
+const graph = await engine.traverseGraph('concepts/superlinear-returns', 3);
 
 // Health check
 const health = await engine.getHealth();
-// { page_count: 7471, embed_coverage: 0.98, stale_pages: 12, orphan_pages: 34 }
+// { page_count: 10, embed_coverage: 1.0, stale_pages: 0, orphan_pages: 10 }
 ```
 
 The `BrainEngine` interface is pluggable. See `docs/ENGINES.md` for how to add backends.
@@ -353,8 +399,8 @@ Fat markdown files that tell AI agents HOW to use gbrain. No skill logic in the 
 | **ingest** | Ingest meetings, docs, articles. Updates compiled truth (rewrite, not append), appends timeline, creates cross-reference links across all mentioned entities. |
 | **query** | 3-layer search (keyword + vector + structured) with synthesis and citations. Says "the brain doesn't have info on X" rather than hallucinating. |
 | **maintain** | Periodic health: find contradictions, stale compiled truth, orphan pages, dead links, tag inconsistency, missing embeddings, overdue threads. |
-| **enrich** | Enrich person/company pages from external APIs (Crustdata, Happenstance, Exa). Raw data stored separately, distilled highlights go to compiled truth. |
-| **briefing** | Daily briefing: today's meetings with participant context, active deals with deadlines, time-sensitive threads, recent changes, people in play. |
+| **enrich** | Enrich pages from external APIs. Raw data stored separately, distilled highlights go to compiled truth. |
+| **briefing** | Daily briefing: today's meetings with participant context, active deals with deadlines, time-sensitive threads, recent changes. |
 | **migrate** | Universal migration from Obsidian (wikilinks to gbrain links), Notion (stripped UUIDs), Logseq (block refs), plain markdown, CSV, JSON, Roam. |
 
 ## Architecture

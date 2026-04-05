@@ -11,7 +11,7 @@ Ingest meetings, articles, documents, and conversations into the brain.
    - If new: `gbrain put <slug>` to create the page
 3. **Append to timeline.** `gbrain timeline-add <slug> <date> <summary>` for each event.
 4. **Create cross-reference links.** `gbrain link <from> <to> --type <relationship>` for every entity pair mentioned together.
-5. **Timeline merge.** The same event appears on ALL mentioned entities' timelines. If Alice met Bob at Brex, the event goes on alice's page, bob's page, and brex's page.
+5. **Timeline merge.** The same event appears on ALL mentioned entities' timelines. If Alice met Bob at Acme Corp, the event goes on Alice's page, Bob's page, and Acme Corp's page.
 
 ## Quality Rules
 
