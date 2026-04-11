@@ -4,9 +4,17 @@ Your AI agent is smart but it doesn't know anything about your life. GBrain fixe
 
 > **Requires a frontier model.** Tested with **Claude Opus 4.6** and **GPT-5.4 Thinking**. Likely to break with smaller models.
 
+## Need an AI agent first?
+
+GBrain is designed to be installed and operated by an AI agent. If you don't have one running yet:
+
+- **[OpenClaw](https://openclaw.ai)** — Deploy [AlphaClaw on Render](https://render.com/deploy?repo=https://github.com/openclaw/alphaclaw) (one click, free tier works)
+- **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** — Deploy on [Railway using this template](https://github.com/praveen-ks-2001/hermes-agent-template) (one click)
+- **[Claude Code](https://claude.ai/code)** — Already installed? Paste the block below directly into your terminal
+
 ## Start here: paste this into your agent
 
-Copy this block into [OpenClaw](https://openclaw.ai) or [Hermes Agent](https://github.com/NousResearch/hermes-agent). The agent will install GBrain, set up your database, import your files, and verify everything works.
+Copy this block into OpenClaw, Hermes Agent, or Claude Code. The agent will install GBrain, set up the brain schema, import your files, configure all integrations, and verify everything works.
 
 ```
 GOAL: I want Garry's exact opinionated Claude Code or Hermes Agent
