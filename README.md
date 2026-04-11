@@ -9,108 +9,47 @@ Your AI agent is smart but it doesn't know anything about your life. GBrain fixe
 Copy this block into [OpenClaw](https://openclaw.ai) or [Hermes Agent](https://github.com/NousResearch/hermes-agent). The agent will install GBrain, set up your database, import your files, and verify everything works.
 
 ```
-GOAL: Install GBrain as my personal knowledge brain. When done, I should
-be able to search my own markdown files with hybrid search (keyword + vector).
+GOAL: Install GBrain so I can search my own markdown files with
+hybrid search (keyword + vector). Do not skip steps. Verify each
+step before proceeding. If a step fails, stop and fix it.
 
-YOU MUST COMPLETE EVERY STEP BELOW. Do not skip steps. Do not reorder.
-Each step depends on the previous one. After each step, verify it worked
-before proceeding. If a step fails, stop and fix it. Do not continue
-past a failed step.
-
-STEP 1 — INSTALL GBRAIN
-Run these commands:
-  curl -fsSL https://bun.sh/install | bash
-  source ~/.bashrc
+STEP 1 — INSTALL
+  curl -fsSL https://bun.sh/install | bash && source ~/.bashrc
   bun add github:garrytan/gbrain
-Verify: run `gbrain --version`. You must see a version number.
-If it fails: check that bun is in your PATH.
+  Verify: gbrain --version
 
-STEP 2 — CONNECT DATABASE
-Run: gbrain init --supabase
-This starts a wizard. You will need the user's Supabase connection string.
-Tell the user:
-  "I need your Supabase Shared Pooler connection string. Here's how to find it:
-   1. Go to https://supabase.com and open your project
-   2. Click 'Get Connected' next to the project URL
-   3. Select 'Direct Connection String' then 'Session Pooler'
-   4. Copy the 'Shared Pooler' connection string
-   5. Paste it here"
-IMPORTANT: Do NOT ask for the anon key or project URL. Those are wrong.
-The connection string starts with postgresql:// and includes port 6543.
-Verify: run `gbrain doctor --json`. ALL checks must pass.
-If doctor fails: check the connection string, make sure pgvector extension
-exists (gbrain init creates it automatically).
+STEP 2 — DATABASE
+  Run: gbrain init --supabase
+  Ask the user for their Supabase Shared Pooler connection string:
+    "Go to https://supabase.com → your project → Get Connected →
+     Direct Connection String → Session Pooler → copy Shared Pooler"
+  Do NOT ask for the anon key or project URL. Those are wrong.
+  Verify: gbrain doctor --json (all checks pass)
 
-STEP 3 — FIND AND IMPORT MARKDOWN
-Search these directories for markdown files:
-  find ~/git ~/Documents ~/notes ~/brain -maxdepth 3 -name "*.md" 2>/dev/null | head -30
-Pick the directory with the most markdown files. Tell the user which
-directory you found and how many files it contains. Ask: "Found N markdown
-files in /path/. Import these into your brain?"
-If user confirms: run `gbrain import /path/ --no-embed`
-Verify: run `gbrain stats`. Page count must be > 0.
+STEP 3 — IMPORT
+  Find markdown: find ~/git ~/Documents ~/notes -maxdepth 3 -name "*.md" | head -30
+  Tell user what you found. Import: gbrain import /path/ --no-embed
+  Verify: gbrain stats (page count > 0)
 
-STEP 4 — PROVE SEARCH WORKS
-Run a keyword search using content from the imported files:
-  gbrain search "a relevant term from the imported content"
-You must get at least 1 result. Show the user the result.
-If 0 results: the import failed. Run `gbrain stats` to check page count.
+STEP 4 — SEARCH
+  Run: gbrain embed --stale (generates vector embeddings, ~1 min per 1000 pages)
+  Then: gbrain query "what are the key themes across these documents?"
+  Show the user the results. This is the magic moment.
+  Verify: results include semantic matches, not just keyword hits
 
-STEP 5 — START EMBEDDINGS
-Run: gbrain embed --stale
-This generates vector embeddings for semantic search. It takes 1-2 minutes
-per 1000 pages. Tell the user: "Generating embeddings for semantic search.
-This takes about [estimated time]. Keyword search already works."
-Verify: run `gbrain stats`. Embedded count must equal chunk count.
+STEP 5 — GO LIVE
+  a. Read docs/GBRAIN_SKILLPACK.md — adopt brain-first lookup, entity
+     detection, and back-linking into your behavior immediately
+  b. Set up live sync: gbrain sync --repo /path/ && gbrain embed --stale
+     (see docs/guides/live-sync.md for cron/watch/webhook options)
+  c. Set up auto-update: gbrain check-update --json on a daily cron
+     (never auto-install — always ask the user first)
+  d. Show available integrations: gbrain integrations
+  e. Run verification: read and execute docs/GBRAIN_VERIFY.md
 
-STEP 6 — PROVE HYBRID SEARCH WORKS
-Run a semantic query (meaning-based, not keyword match):
-  gbrain query "what are the key themes across these documents?"
-You must get results that show vector + keyword fusion working.
-Show the user. This is the magic moment.
-
-STEP 7 — LOAD THE SKILLPACK
-Read docs/GBRAIN_SKILLPACK.md. This is your operational playbook.
-Adopt these patterns into your behavior immediately:
-  - Brain-first lookup: ALWAYS search the brain before answering questions
-  - Entity detection: detect people, companies, concepts in every message
-  - Source attribution: cite brain pages when using brain knowledge
-  - Iron law of back-linking: every entity mention gets a back-link
-  - Compiled truth: rewrite the synthesis, never the timeline
-Read the individual guides in docs/guides/ for detailed instructions
-on each pattern.
-
-STEP 8 — SET UP LIVE SYNC
-The brain must stay current with the markdown repo. Set up sync:
-  gbrain sync --repo /path/to/brain/ && gbrain embed --stale
-Read docs/guides/live-sync.md for approach options (cron, --watch, webhook).
-Pick whichever fits your environment. Verify: edit a markdown file in the
-repo, run sync, search for the change. The updated content must appear.
-
-STEP 9 — SET UP AUTO-UPDATE
-Run: gbrain check-update --json
-Set up a daily cron or scheduled check. When new versions are available,
-tell the user what's new and ask if they want to upgrade.
-IMPORTANT: Never auto-install updates. Always ask first.
-
-STEP 10 — CHECK AVAILABLE INTEGRATIONS
-Run: gbrain integrations
-Show the user what senses (data inputs) are available. If they want
-any integration (voice-to-brain, email, etc.), run:
-  gbrain integrations show <id>
-and follow the recipe step by step.
-
-STEP 11 — VERIFY EVERYTHING
-Run the verification runbook: read docs/GBRAIN_VERIFY.md
-Execute every check. All must pass. Report results to the user.
-If any check fails, fix it before declaring setup complete.
-
-DONE. Tell the user:
-  "GBrain is set up. You have [N] pages indexed with hybrid search.
-   I will check the brain before answering questions about people,
-   companies, or topics in your knowledge base. Your brain stays
-   current via live sync. Run 'gbrain integrations' to add new
-   senses like voice calls, email, or calendar."
+DONE. Tell the user: "GBrain is live. You have [N] pages with hybrid
+search. I now check the brain before answering questions. Run
+'gbrain integrations' to add voice, email, calendar, or Twitter."
 ```
 
 ### Without an agent (standalone CLI)
