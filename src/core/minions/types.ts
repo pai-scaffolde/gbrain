@@ -284,7 +284,7 @@ export function rowToMinionJob(row: Record<string, unknown>): MinionJob {
     lock_token: (row.lock_token as string) || null,
     lock_until: row.lock_until ? new Date(row.lock_until as string) : null,
     delay_until: row.delay_until ? new Date(row.delay_until as string) : null,
-    parent_job_id: (row.parent_job_id as number) || null,
+    parent_job_id: (row.parent_job_id as number | null) ?? null,
     on_child_fail: row.on_child_fail as ChildFailPolicy,
     tokens_input: (row.tokens_input as number) ?? 0,
     tokens_output: (row.tokens_output as number) ?? 0,

@@ -113,13 +113,13 @@ export class MinionQueue {
         ? `INSERT INTO minion_jobs (name, queue, status, priority, data, max_attempts, backoff_type,
             backoff_delay, backoff_jitter, delay_until, parent_job_id, on_child_fail,
             depth, max_children, timeout_ms, remove_on_complete, remove_on_fail, idempotency_key)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
            ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
            RETURNING *`
         : `INSERT INTO minion_jobs (name, queue, status, priority, data, max_attempts, backoff_type,
             backoff_delay, backoff_jitter, delay_until, parent_job_id, on_child_fail,
             depth, max_children, timeout_ms, remove_on_complete, remove_on_fail, idempotency_key)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
            RETURNING *`;
 
       const params = [
@@ -127,7 +127,7 @@ export class MinionQueue {
         opts?.queue ?? 'default',
         childStatus,
         opts?.priority ?? 0,
-        JSON.stringify(data ?? {}),
+        data ?? {},
         opts?.max_attempts ?? 3,
         opts?.backoff_type ?? 'exponential',
         opts?.backoff_delay ?? 1000,
@@ -450,11 +450,11 @@ export class MinionQueue {
       }
 
       const rows = await tx.executeRaw<Record<string, unknown>>(
-        `UPDATE minion_jobs SET status = 'completed', result = $1,
+        `UPDATE minion_jobs SET status = 'completed', result = $1::jsonb,
           finished_at = now(), lock_token = NULL, lock_until = NULL, updated_at = now()
          WHERE id = $2 AND status = 'active' AND lock_token = $3
          RETURNING *`,
-        [result ? JSON.stringify(result) : null, id, lockToken]
+        [result ?? null, id, lockToken]
       );
       if (rows.length === 0) return null;
 
@@ -841,7 +841,7 @@ export class MinionQueue {
     const params: unknown[] = [parentId];
     let sinceClause = '';
     if (opts?.since) {
-      sinceClause = ` AND sent_at > $2`;
+      sinceClause = ` AND sent_at > $2::timestamptz`;
       params.push(opts.since.toISOString());
     }
 
