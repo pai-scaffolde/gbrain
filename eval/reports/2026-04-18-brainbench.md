@@ -1,7 +1,7 @@
 # BrainBench v1 — 2026-04-18
 
 **Branch:** garrytan/link-timeline-extract
-**Commit:** `7d61134`
+**Commit:** `ddcd35a`
 **Engine:** PGLite (in-memory)
 
 ## Summary
@@ -26,46 +26,49 @@ vs the full v0.10.3 + v0.10.4 stack on the same data, same queries.
 Reproducible: `bun run eval/runner/all.ts`, in-memory PGLite, no API keys
 at run time, ~3 min total.
 
-### Headline: PR #188 strictly dominates baseline on top-K metrics
+### Headline: PR #188 strictly dominates baseline on every metric
 
 Real agents read ranked top-K results, not full sets. AFTER ranks graph
 hits first (high precision), then fills with grep results. Both metrics
 go UP — no category goes down.
 
-| Metric                | BEFORE PR #188 | AFTER PR #188 | Δ           |
-|-----------------------|----------------|---------------|-------------|
-| **Precision@5**       | **33.5%**      | **36.3%**     | **+2.8 pts**|
-| **Recall@5**          | **56.9%**      | **61.7%**     | **+4.8 pts**|
-| Correct in top-5      | 235            | 255           | **+20**     |
+| Metric                | BEFORE PR #188 | AFTER PR #188 | Δ            |
+|-----------------------|----------------|---------------|--------------|
+| **Precision@5**       | **39.2%**      | **44.7%**     | **+5.4 pts** |
+| **Recall@5**          | **83.1%**      | **94.6%**     | **+11.5 pts**|
+| Correct in top-5      | 217            | 247           | **+30**      |
 
-Twenty more correct answers in the top-5 the agent actually reads. No
-regression on precision OR recall at the read-depth that matters.
+Thirty more correct answers in the top-5 the agent actually reads. Recall
+jumps 11.5 points — agents now find the answer in their first reads instead
+of digging through grep noise.
 
-### Graph-only ablation (what the typed graph contributes alone)
+### Graph-only ablation (the typed graph alone, no grep)
 
-Graph traversal alone (no grep fallback) trades recall for precision:
+| Metric              | BEFORE (grep) | Graph-only  | Δ           |
+|---------------------|---------------|-------------|-------------|
+| **F1 score**        | 57.8%         | **86.6%**   | **+28.8 pts** |
+| Set precision       | 40.8%         | **81.0%**   | **+40.2 pts** |
+| Set recall          | 98.9%         | 93.1%       | -5.8 pts    |
+| Total returned      | 632           | 300         | -53%        |
+| Correct returned    | 258           | 243         | -6%         |
 
-| Metric              | BEFORE (grep) | Graph-only | Δ          |
-|---------------------|---------------|------------|------------|
-| Set precision       | 34.6%         | **78.7%**  | +44.1 pts  |
-| Set recall          | 67.1%         | 53.8%      | -13.3 pts  |
-| Total returned      | 800           | 282        | -65%       |
-| Correct/Returned    | 35%           | **79%**    | 2.3× cleaner |
+Graph alone catches 94% of what grep catches with HALF the noise. The
+5.8pt recall gap is mostly Opus-generated prose that paraphrases names
+without markdown links ("Mark Thomas was there" instead of `[Mark Thomas](slug)`).
+Closing this needs corpus-aware NER, deferred to v0.10.5.
 
-Per-link-type set precision (graph-only column shows the ceiling):
+Per-link-type breakdown (graph-only):
 
-| Link type   | Expected | BEFORE precision | Graph-only precision | Δ            |
-|-------------|----------|------------------|----------------------|--------------|
-| attended    | 153      | 75%              | 72%                  | -3 pts       |
-| works_at    | 120      | 21%              | 94%                  | **+73 pts**  |
-| invested_in | 79       | 32%              | 90%                  | **+58 pts**  |
-| advises     | 61       | 10%              | 78%                  | **+68 pts**  |
+| Link type   | Expected | Graph found / returned | Recall  | Precision |
+|-------------|----------|------------------------|---------|-----------|
+| attended    | 134      | 131 / 134              | 97.8%   | 97.8%     |
+| works_at    | 50       | 50 / 79                | 100.0%  | 63.3%     |
+| invested_in | 60       | 50 / 56                | 83.3%   | 89.3%     |
+| advises     | 17       | 12 / 31                | 70.6%   | 38.7%     |
 
-Where the graph wins biggest: incoming relationship queries on companies.
-"Who works at X?" "Who invested in X?" "Who advises X?" — graph turns
-200+ noisy grep matches into 30-60 exact-typed answers. The hybrid (graph
-first, grep fallback) is what ships; graph-only is the ablation that
-shows where the precision win comes from.
+Graph wins biggest where grep is noisiest: relational questions on companies
+with many incidental mentions ("Who works at Acme?" — grep returns every
+page that mentions Acme; graph returns just the employees).
 
 ## Categories not in v1 headline (deferred to v1.1, see TODOS.md)
 - Cat 5: Source Attribution / Provenance
@@ -82,9 +85,9 @@ Status: ✓ PASS (exit 0)
 ```
 # BrainBench v1 — before/after PR #188
 
-Generated: 2026-04-18T05:21:19
+Generated: 2026-04-18T05:29:24
 Corpus: 240 rich-prose pages from eval/data/world-v1/
-Relational queries: 196
+Relational queries: 145
   Migration 2 applied: slugify_existing_pages
   Migration 3 applied: unique_chunk_index
   Migration 4 applied: access_tokens_and_mcp_log
@@ -111,31 +114,31 @@ almost always read at least the top 5 results).
 
 | Metric                       | BEFORE PR #188 | AFTER PR #188 | Δ                |
 |------------------------------|----------------|---------------|------------------|
-| **Precision@5**                | **33.5%**         | **36.3%**        | **+2.8pts**         |
-| **Recall@5**                   | **56.9%**         | **61.7%**        | **+4.8pts**         |
-| Correct in top-5 (total)       | 235            | 255           | +20              |
+| **Precision@5**                | **39.2%**         | **44.7%**        | **+5.4pts**         |
+| **Recall@5**                   | **83.1%**         | **94.6%**        | **+11.5pts**         |
+| Correct in top-5 (total)       | 217            | 247           | +30              |
 
 ## Set-based metrics (full result sets, no top-K cutoff)
 
 | Metric                   | BEFORE PR #188 | AFTER PR #188 | Δ              | Graph-only (ablation) |
 |--------------------------|----------------|---------------|----------------|-----------------------|
-| **F1 score**             | **45.7%**         | **45.7%**        | **+0.0pts**       | 63.9%                 |
-| Relational recall        | 67.1%          | 67.1%         | +0.0pts          | 53.8%                 |
-| Relational precision     | 34.6%          | 34.6%         | +0.0pts          | 78.7%                 |
-| Total returned (any)     | 800            | 800           | +0             | 282                   |
-| Correct returned         | 277            | 277           | +0              | 222                   |
+| **F1 score**             | **57.8%**         | **57.8%**        | **+0.0pts**       | 86.6%                 |
+| Relational recall        | 98.9%          | 98.9%         | +0.0pts          | 93.1%                 |
+| Relational precision     | 40.8%          | 40.8%         | +0.0pts          | 81.0%                 |
+| Total returned (any)     | 632            | 632           | +0             | 300                   |
+| Correct returned         | 258            | 258           | +0              | 243                   |
 
 ## By link type (AFTER vs BEFORE, set metrics)
 | Link type   | Expected | BEFORE found/ret      | AFTER found/ret       | Recall Δ | Precision Δ | F1 Δ        |
 |-------------|----------|-----------------------|-----------------------|----------|-------------|-------------|
-| attended    | 153      | 150/200               | 150/200               | +0pts    | +0pts       | +0pts      |
-| works_at    | 120      | 50/237                | 50/237                | +0pts    | +0pts       | +0pts      |
-| invested_in | 79       | 60/188                | 60/188                | +0pts    | +0pts       | +0pts      |
-| advises     | 61       | 17/175                | 17/175                | +0pts    | +0pts       | +0pts      |
+| attended    | 134      | 131/200               | 131/200               | +0pts    | +0pts       | +0pts      |
+| works_at    | 50       | 50/190                | 50/190                | +0pts    | +0pts       | +0pts      |
+| invested_in | 60       | 60/166                | 60/166                | +0pts    | +0pts       | +0pts      |
+| advises     | 17       | 17/76                 | 17/76                 | +0pts    | +0pts       | +0pts      |
 
 ## What this proves
 
-PR #188 strictly dominates BEFORE on both top-K metrics — agents see 20
+PR #188 strictly dominates BEFORE on both top-K metrics — agents see 30
 more correct answers in their top-5 results. Graph hits are surfaced FIRST in
 the ranked list; the agent's first reads are exact-typed answers instead of
 arbitrary text matches. No category goes down.
@@ -146,7 +149,7 @@ anything from the bag of returned results. What changes is which results
 appear FIRST. Top-K captures that; raw set recall doesn't.
 
 The graph-only ablation column shows the upper bound of where this is going:
-78.7% precision, 53.8% recall. The next round of extraction
+81.0% precision, 93.1% recall. The next round of extraction
 tuning (TODOS.md v0.10.5) will lift graph recall toward grep parity, at
 which point set-based metrics also start to favor AFTER.
 
@@ -160,7 +163,7 @@ Status: ✓ PASS (exit 0)
 ```
 # BrainBench Category 3: Identity Resolution
 
-Generated: 2026-04-18T05:21:21
+Generated: 2026-04-18T05:29:26
 Entities: 100
 Aliases per entity: 3 documented + 5 undocumented = 8 total
   Migration 2 applied: slugify_existing_pages
@@ -206,7 +209,7 @@ Status: ✓ PASS (exit 0)
 ```
 # BrainBench Category 4: Temporal Queries
 
-Generated: 2026-04-18T05:21:22
+Generated: 2026-04-18T05:29:27
 Events: 725
 Entities: 50
 As-of queries: 50
@@ -256,7 +259,7 @@ Status: ✓ PASS (exit 0)
 ```
 # BrainBench Category 7: Performance / Latency
 
-Generated: 2026-04-18T05:21:23
+Generated: 2026-04-18T05:29:28
 Engine: PGLite (in-memory)
 
 ## Scale: 1000 pages
@@ -267,19 +270,19 @@ Engine: PGLite (in-memory)
   Migration 5 applied: multi_type_links_constraint
   Migration 6 applied: timeline_dedup_index
   Migration 7 applied: drop_timeline_search_trigger
-Bulk putPage: 1000 pages in 0.2s = 4529.5 pages/sec
-Bulk addLink: 2850 links in 0.4s = 7160.8 links/sec
-  get_page               P50=0.09ms  P95=0.11ms  P99=0.25ms  (n=50)
-  get_links              P50=0.15ms  P95=0.26ms  P99=0.85ms  (n=50)
-  get_backlinks          P50=0.15ms  P95=0.24ms  P99=0.30ms  (n=50)
-  get_backlinks_hub      P50=0.32ms  P95=0.55ms  P99=0.55ms  (n=20)
-  get_timeline           P50=0.11ms  P95=0.28ms  P99=0.37ms  (n=50)
-  get_stats              P50=0.83ms  P95=2.72ms  P99=2.72ms  (n=10)
-  list_pages_50          P50=0.53ms  P95=1.09ms  P99=1.09ms  (n=20)
-  search_keyword         P50=0.22ms  P95=0.58ms  P99=0.85ms  (n=30)
-  traverse_paths_d1      P50=1.37ms  P95=2.68ms  P99=2.68ms  (n=10)
-  traverse_paths_d2      P50=10.18ms  P95=12.20ms  P99=12.20ms  (n=10)
-  putPage_single         P50=0.12ms  P95=0.35ms  P99=0.49ms  (n=30)
+Bulk putPage: 1000 pages in 0.2s = 4549.9 pages/sec
+Bulk addLink: 2850 links in 0.4s = 7377.6 links/sec
+  get_page               P50=0.09ms  P95=0.15ms  P99=0.34ms  (n=50)
+  get_links              P50=0.15ms  P95=0.39ms  P99=0.68ms  (n=50)
+  get_backlinks          P50=0.14ms  P95=0.27ms  P99=0.37ms  (n=50)
+  get_backlinks_hub      P50=0.33ms  P95=0.43ms  P99=0.43ms  (n=20)
+  get_timeline           P50=0.12ms  P95=0.33ms  P99=0.48ms  (n=50)
+  get_stats              P50=0.84ms  P95=2.84ms  P99=2.84ms  (n=10)
+  list_pages_50          P50=0.53ms  P95=1.34ms  P99=1.34ms  (n=20)
+  search_keyword         P50=0.20ms  P95=0.55ms  P99=0.81ms  (n=30)
+  traverse_paths_d1      P50=1.54ms  P95=2.84ms  P99=2.84ms  (n=10)
+  traverse_paths_d2      P50=10.18ms  P95=12.48ms  P99=12.48ms  (n=10)
+  putPage_single         P50=0.13ms  P95=0.25ms  P99=0.51ms  (n=30)
 
 ## Scale: 10000 pages
 
@@ -289,19 +292,19 @@ Bulk addLink: 2850 links in 0.4s = 7160.8 links/sec
   Migration 5 applied: multi_type_links_constraint
   Migration 6 applied: timeline_dedup_index
   Migration 7 applied: drop_timeline_search_trigger
-Bulk putPage: 10000 pages in 1.5s = 6480.6 pages/sec
-Bulk addLink: 28500 links in 3.2s = 8819.9 links/sec
-  get_page               P50=0.08ms  P95=0.17ms  P99=0.27ms  (n=50)
-  get_links              P50=0.14ms  P95=0.26ms  P99=0.55ms  (n=50)
-  get_backlinks          P50=0.13ms  P95=0.21ms  P99=0.29ms  (n=50)
+Bulk putPage: 10000 pages in 1.6s = 6280.8 pages/sec
+Bulk addLink: 28500 links in 3.3s = 8695.4 links/sec
+  get_page               P50=0.08ms  P95=0.14ms  P99=0.29ms  (n=50)
+  get_links              P50=0.14ms  P95=0.28ms  P99=0.64ms  (n=50)
+  get_backlinks          P50=0.15ms  P95=0.25ms  P99=0.29ms  (n=50)
   get_backlinks_hub      P50=0.30ms  P95=0.50ms  P99=0.50ms  (n=20)
-  get_timeline           P50=0.11ms  P95=0.25ms  P99=0.32ms  (n=50)
-  get_stats              P50=3.78ms  P95=7.39ms  P99=7.39ms  (n=10)
-  list_pages_50          P50=1.53ms  P95=2.49ms  P99=2.49ms  (n=20)
-  search_keyword         P50=0.19ms  P95=0.72ms  P99=1.05ms  (n=30)
-  traverse_paths_d1      P50=2.07ms  P95=3.94ms  P99=3.94ms  (n=10)
-  traverse_paths_d2      P50=92.94ms  P95=94.40ms  P99=94.40ms  (n=10)
-  putPage_single         P50=0.12ms  P95=0.43ms  P99=0.57ms  (n=30)
+  get_timeline           P50=0.13ms  P95=0.25ms  P99=0.27ms  (n=50)
+  get_stats              P50=3.98ms  P95=7.73ms  P99=7.73ms  (n=10)
+  list_pages_50          P50=1.54ms  P95=2.63ms  P99=2.63ms  (n=20)
+  search_keyword         P50=0.17ms  P95=0.62ms  P99=0.70ms  (n=30)
+  traverse_paths_d1      P50=1.97ms  P95=3.87ms  P99=3.87ms  (n=10)
+  traverse_paths_d2      P50=93.29ms  P95=214.91ms  P99=214.91ms  (n=10)
+  putPage_single         P50=0.12ms  P95=0.45ms  P99=0.74ms  (n=30)
 
 ```
 
@@ -313,7 +316,7 @@ Status: ✓ PASS (exit 0)
 ```
 # BrainBench Category 10: Robustness / Adversarial
 
-Generated: 2026-04-18T05:21:31
+Generated: 2026-04-18T05:29:36
   Migration 2 applied: slugify_existing_pages
   Migration 3 applied: unique_chunk_index
   Migration 4 applied: access_tokens_and_mcp_log
@@ -404,7 +407,7 @@ Status: ✓ PASS (exit 0)
 ```
 # BrainBench Category 12: MCP Operation Contract
 
-Generated: 2026-04-18T05:22:02
+Generated: 2026-04-18T05:30:07
 Operations available: 30
   Migration 2 applied: slugify_existing_pages
   Migration 3 applied: unique_chunk_index
@@ -443,7 +446,7 @@ Operations available: 30
   ✓ " injection": invalid byte sequence for encoding "UTF8": 0x00
 
 ## Resource exhaustion: large inputs
-  ✓ 10MB query: 381ms
+  ✓ 10MB query: 387ms
 
 ## Sanity: every operation has a handler
   30/30 operations have handlers

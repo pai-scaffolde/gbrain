@@ -216,7 +216,10 @@ const WORKS_AT_RE = /\b(?:CEO of|CTO of|COO of|CFO of|CMO of|CRO of|VP at|VP of|
 // company", "portfolio includes").
 const INVESTED_RE = /\b(?:invested in|invests in|investing in|invest in|investment in|investments in|backed by|funding from|funded by|raised from|led the (?:seed|Series|round|investment|round)|led .{0,30}(?:Series [A-Z]|seed|round|investment)|participated in (?:the )?(?:seed|Series|round)|wrote (?:a |the )?check|first check|early investor|portfolio (?:company|includes)|board seat (?:at|in|on)|term sheet for)\b/i;
 
-const FOUNDED_RE = /\b(?:founded|co-?founded|started the company|incorporated)\b/i;
+// Founded patterns. Includes the noun-form "founder of" / "founders include"
+// because that's how real prose identifies founders ("Carol Wilson is the
+// founder of Anchor"). Diagnosed via BrainBench rich-corpus misses.
+const FOUNDED_RE = /\b(?:founded|co-?founded|started the company|incorporated|founder of|founders? (?:include|are)|the founder|is a co-?founder|is one of the founders)\b/i;
 
 // Advise context: must be rooted in "advisor"/"advise" (investors also sit on
 // boards). Keep "board advisor" / "advisory board" but drop generic "board

@@ -66,36 +66,47 @@ interface RelationalQuery {
   expected: string[];
   /** Direction of relationship (in: who points at seed; out: what does seed point at). */
   direction: 'in' | 'out';
-  /** Filter by link type (e.g., 'attended', 'works_at', 'invested_in'). */
-  linkType?: string;
+  /** Accept any of these link types as a match. ["works_at", "founded"]
+   *  for "who works at X" because founders are employees. */
+  linkTypes: string[];
 }
 
 function buildRelationalQueries(pages: RichPage[]): RelationalQuery[] {
   const queries: RelationalQuery[] = [];
+  // Only entities that actually have generated pages are valid expected
+  // answers. The world generator references some entities (by slug in facts)
+  // that aren't in the 240-page Opus subset — those can't be extracted as
+  // links because the FK constraint blocks unresolved targets.
+  const existingSlugs = new Set(pages.map(p => p.slug));
+  const filterExisting = (slugs: string[]) => slugs.filter(s => existingSlugs.has(s));
 
   // "Who attended meeting X?" — outgoing from each meeting page.
   for (const p of pages) {
     if (p._facts.type === 'meeting' && p._facts.attendees && p._facts.attendees.length > 0) {
+      const expected = filterExisting(p._facts.attendees);
+      if (expected.length === 0) continue;
       queries.push({
         question: `Who attended ${p.title}?`,
         seed: p.slug,
-        expected: p._facts.attendees,
+        expected,
         direction: 'out',
-        linkType: 'attended',
+        linkTypes: ['attended'],
       });
     }
   }
 
   // "Who works at company X?" — incoming to each company.
+  // Founders are employees too — accept both `works_at` and `founded`.
   for (const p of pages) {
     if (p._facts.type === 'company' && p._facts.employees && p._facts.employees.length > 0) {
-      const expected = [...(p._facts.employees ?? []), ...(p._facts.founders ?? [])];
+      const expected = filterExisting([...(p._facts.employees ?? []), ...(p._facts.founders ?? [])]);
+      if (expected.length === 0) continue;
       queries.push({
         question: `Who works at ${p.title}?`,
         seed: p.slug,
         expected: [...new Set(expected)],
         direction: 'in',
-        linkType: 'works_at',
+        linkTypes: ['works_at', 'founded'],
       });
     }
   }
@@ -103,12 +114,14 @@ function buildRelationalQueries(pages: RichPage[]): RelationalQuery[] {
   // "Who invested in company X?" — incoming.
   for (const p of pages) {
     if (p._facts.type === 'company' && p._facts.investors && p._facts.investors.length > 0) {
+      const expected = filterExisting(p._facts.investors);
+      if (expected.length === 0) continue;
       queries.push({
         question: `Who invested in ${p.title}?`,
         seed: p.slug,
-        expected: p._facts.investors,
+        expected,
         direction: 'in',
-        linkType: 'invested_in',
+        linkTypes: ['invested_in'],
       });
     }
   }
@@ -116,12 +129,14 @@ function buildRelationalQueries(pages: RichPage[]): RelationalQuery[] {
   // "Who advises company X?"
   for (const p of pages) {
     if (p._facts.type === 'company' && p._facts.advisors && p._facts.advisors.length > 0) {
+      const expected = filterExisting(p._facts.advisors);
+      if (expected.length === 0) continue;
       queries.push({
         question: `Who advises ${p.title}?`,
         seed: p.slug,
-        expected: p._facts.advisors,
+        expected,
         direction: 'in',
-        linkType: 'advises',
+        linkTypes: ['advises'],
       });
     }
   }
@@ -229,18 +244,20 @@ async function main() {
     let beforeFound = 0;
     for (const e of q.expected) if (beforeReturned.has(e)) beforeFound++;
 
-    // AFTER (graph-only): traversePaths with type filter — used for the
-    // ablation column so readers can see how much of AFTER's win is the
-    // graph itself vs the hybrid combo.
-    const paths = await engine.traversePaths(q.seed, {
-      depth: 1,
-      direction: q.direction,
-      linkType: q.linkType,
-    });
+    // AFTER (graph-only): traversePaths once per accepted link type, union
+    // results. ("Who works at X?" accepts both works_at and founded — founders
+    // are employees by definition.) Used for the ablation column.
     const graphOnlyReturned = new Set<string>();
-    for (const p of paths) {
-      const target = q.direction === 'out' ? p.to_slug : p.from_slug;
-      if (target !== q.seed) graphOnlyReturned.add(target);
+    for (const lt of q.linkTypes) {
+      const paths = await engine.traversePaths(q.seed, {
+        depth: 1,
+        direction: q.direction,
+        linkType: lt,
+      });
+      for (const p of paths) {
+        const target = q.direction === 'out' ? p.to_slug : p.from_slug;
+        if (target !== q.seed) graphOnlyReturned.add(target);
+      }
     }
     let graphOnlyFound = 0;
     for (const e of q.expected) if (graphOnlyReturned.has(e)) graphOnlyFound++;
@@ -305,12 +322,12 @@ async function main() {
   const afterRecall = totalExpected > 0 ? afterTotalFound / totalExpected : 1;
   const afterPrecision = afterTotalReturned > 0 ? afterTotalFound / afterTotalReturned : 1;
 
-  // Per-link-type breakdown
+  // Per-link-type breakdown (group by primary type — first in linkTypes array)
   const byType: Record<string, { exp: number; bF: number; bR: number; gF: number; gR: number; aF: number; aR: number }> = {};
   for (let i = 0; i < queries.length; i++) {
     const q = queries[i];
     const r = results[i];
-    const t = q.linkType ?? 'unknown';
+    const t = q.linkTypes[0] ?? 'unknown';
     byType[t] ??= { exp: 0, bF: 0, bR: 0, gF: 0, gR: 0, aF: 0, aR: 0 };
     byType[t].exp += r.expected;
     byType[t].bF += r.beforeFound;
