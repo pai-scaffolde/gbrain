@@ -12,6 +12,7 @@ import {
   findBareTweetHits,
   findExternalLinks,
   extractXHandleFromFrontmatter,
+  runIntegrity,
 } from '../src/commands/integrity.ts';
 
 // ---------------------------------------------------------------------------
@@ -153,5 +154,59 @@ describe('extractXHandleFromFrontmatter', () => {
       twitter_handle: 'tertiary',
       x: 'quaternary',
     })).toBe('primary');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CLI dispatch — non-DB paths (help + review-on-empty)
+// ---------------------------------------------------------------------------
+
+describe('runIntegrity CLI dispatch', () => {
+  test('--help prints help without touching engine', async () => {
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (msg?: unknown) => { logs.push(String(msg)); };
+    try {
+      await runIntegrity(['--help']);
+    } finally {
+      console.log = origLog;
+    }
+    expect(logs.join('\n')).toMatch(/gbrain integrity/i);
+  });
+
+  test('no subcommand behaves like --help', async () => {
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (msg?: unknown) => { logs.push(String(msg)); };
+    try {
+      await runIntegrity([]);
+    } finally {
+      console.log = origLog;
+    }
+    expect(logs.join('\n')).toMatch(/integrity/i);
+  });
+
+  test('unknown subcommand prints error + exits', async () => {
+    const logs: string[] = [];
+    const errs: string[] = [];
+    const origLog = console.log;
+    const origErr = console.error;
+    const origExit = process.exit;
+    let exitCode: number | undefined;
+    console.log = (msg?: unknown) => { logs.push(String(msg)); };
+    console.error = (msg?: unknown) => { errs.push(String(msg)); };
+    // prevent process.exit from killing the test runner
+    process.exit = ((code?: number) => { exitCode = code; throw new Error('__exit__'); }) as typeof process.exit;
+    try {
+      await runIntegrity(['nonsense-cmd']);
+    } catch (e) {
+      if ((e as Error).message !== '__exit__') throw e;
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      process.exit = origExit;
+    }
+    expect(exitCode).toBe(1);
+    expect(errs.join('\n')).toMatch(/Unknown subcommand/);
   });
 });
