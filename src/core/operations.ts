@@ -13,7 +13,7 @@ import { importFromContent } from './import-file.ts';
 import { hybridSearch } from './search/hybrid.ts';
 import { expandQuery } from './search/expansion.ts';
 import { dedupResults } from './search/dedup.ts';
-import { extractPageLinks, isAutoLinkEnabled } from './link-extraction.ts';
+import { extractPageLinks, isAutoLinkEnabled, isAutoTimelineEnabled, parseTimelineEntries } from './link-extraction.ts';
 import * as db from './db.ts';
 
 // --- Types ---
@@ -221,7 +221,7 @@ const get_page: Operation = {
 
 const put_page: Operation = {
   name: 'put_page',
-  description: 'Write/update a page (markdown with frontmatter). Chunks, embeds, reconciles tags, and (when auto_link is enabled) extracts + reconciles graph links.',
+  description: 'Write/update a page (markdown with frontmatter). Chunks, embeds, reconciles tags, and (when auto_link/auto_timeline are enabled) extracts + reconciles graph links and timeline entries.',
   params: {
     slug: { type: 'string', required: true, description: 'Page slug' },
     content: { type: 'string', required: true, description: 'Full markdown content with YAML frontmatter' },
@@ -249,8 +249,10 @@ const put_page: Operation = {
     // would surface higher in search. Local CLI users (ctx.remote=false) opt
     // into this behavior; MCP/remote writes do not.
     let autoLinks: { created: number; removed: number; errors: number } | { error: string } | { skipped: 'remote' } | undefined;
+    let autoTimeline: { created: number } | { error: string } | { skipped: 'remote' } | undefined;
     if (ctx.remote === true) {
       autoLinks = { skipped: 'remote' };
+      autoTimeline = { skipped: 'remote' };
     } else if (result.parsedPage) {
       try {
         const enabled = await isAutoLinkEnabled(ctx.engine);
@@ -259,6 +261,31 @@ const put_page: Operation = {
         }
       } catch (e) {
         autoLinks = { error: e instanceof Error ? e.message : String(e) };
+      }
+      // Timeline extraction mirrors auto-link: runs post-write, best-effort,
+      // never blocks the write. ON CONFLICT DO NOTHING in
+      // addTimelineEntriesBatch keeps it idempotent across re-writes, so a
+      // page that's edited and re-written won't duplicate its own timeline.
+      try {
+        const enabled = await isAutoTimelineEnabled(ctx.engine);
+        if (enabled) {
+          const fullContent = result.parsedPage.compiled_truth + '\n' + result.parsedPage.timeline;
+          const entries = parseTimelineEntries(fullContent);
+          if (entries.length > 0) {
+            const batch = entries.map(e => ({
+              slug,
+              date: e.date,
+              summary: e.summary,
+              detail: e.detail || '',
+            }));
+            const created = await ctx.engine.addTimelineEntriesBatch(batch);
+            autoTimeline = { created };
+          } else {
+            autoTimeline = { created: 0 };
+          }
+        }
+      } catch (e) {
+        autoTimeline = { error: e instanceof Error ? e.message : String(e) };
       }
     }
 
@@ -288,6 +315,7 @@ const put_page: Operation = {
       status: result.status === 'imported' ? 'created_or_updated' : result.status,
       chunks: result.chunks,
       ...(autoLinks ? { auto_links: autoLinks } : {}),
+      ...(autoTimeline ? { auto_timeline: autoTimeline } : {}),
       ...(writerLint ? { writer_lint: writerLint } : {}),
     };
   },
