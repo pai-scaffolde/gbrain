@@ -27,7 +27,10 @@
  */
 export interface Page {
   slug: string;
-  type: 'person' | 'company' | 'meeting' | 'concept' | 'deal' | 'project' | 'source' | 'media';
+  // BrainBench v1 adds email | slack | calendar-event | note for the amara-life-v1
+  // corpus (inbox/slack/calendar/notes ingestion). Existing categories unchanged.
+  type: 'person' | 'company' | 'meeting' | 'concept' | 'deal' | 'project' | 'source' | 'media'
+      | 'email' | 'slack' | 'calendar-event' | 'note';
   title: string;
   compiled_truth: string;
   timeline: string;

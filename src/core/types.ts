@@ -1,5 +1,8 @@
 // Page types
-export type PageType = 'person' | 'company' | 'deal' | 'yc' | 'civic' | 'project' | 'concept' | 'source' | 'media' | 'writing' | 'analysis' | 'guide' | 'hardware' | 'architecture';
+// BrainBench v1 addition (email | slack | calendar-event | note): native Page types
+// for the amara-life-v1 fictional corpus. Previously these collapsed into `source`
+// which lost workflow semantics (e.g. "attended meetings" vs "received emails").
+export type PageType = 'person' | 'company' | 'deal' | 'yc' | 'civic' | 'project' | 'concept' | 'source' | 'media' | 'writing' | 'analysis' | 'guide' | 'hardware' | 'architecture' | 'email' | 'slack' | 'calendar-event' | 'note' | 'meeting';
 
 export interface Page {
   id: number;
