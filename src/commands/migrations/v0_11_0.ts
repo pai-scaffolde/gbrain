@@ -23,6 +23,14 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, lstatSync, statSync, realpathSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { execSync } from 'child_process';
+
+import { gbrainSelfCmd } from './gbrain-self.ts';
+
+// Re-invoke the CURRENTLY-RUNNING gbrain CLI. `gbrain` off $PATH is unsafe
+// here: on bun-linked installs `process.execPath` is the bun interpreter,
+// not the gbrain entry. gbrainSelfCmd() builds `bun run <argv[1]>` which
+// always resolves to the right binary.
+const GBRAIN = gbrainSelfCmd();
 import type { Migration, OrchestratorOpts, OrchestratorResult, OrchestratorPhaseResult } from './types.ts';
 import { savePreferences, loadPreferences, appendCompletedMigration } from '../../core/preferences.ts';
 import { promptLine } from '../../core/cli-util.ts';
@@ -59,7 +67,7 @@ export interface PendingHostWorkEntry {
 function phaseASchema(opts: OrchestratorOpts): OrchestratorPhaseResult {
   if (opts.dryRun) return { name: 'schema', status: 'skipped', detail: 'dry-run' };
   try {
-    execSync('gbrain init --migrate-only', { stdio: 'inherit', timeout: 60_000, env: process.env });
+    execSync(`${GBRAIN} init --migrate-only`, { stdio: 'inherit', timeout: 60_000, env: process.env });
     return { name: 'schema', status: 'complete' };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -74,7 +82,7 @@ function phaseASchema(opts: OrchestratorOpts): OrchestratorPhaseResult {
 function phaseBSmoke(opts: OrchestratorOpts): OrchestratorPhaseResult {
   if (opts.dryRun) return { name: 'smoke', status: 'skipped', detail: 'dry-run' };
   try {
-    execSync('gbrain jobs smoke', { stdio: 'inherit', timeout: 30_000, env: process.env });
+    execSync(`${GBRAIN} jobs smoke`, { stdio: 'inherit', timeout: 30_000, env: process.env });
     return { name: 'smoke', status: 'complete' };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -395,7 +403,7 @@ function phaseFInstall(opts: OrchestratorOpts): OrchestratorPhaseResult {
   if (opts.dryRun) return { name: 'install', status: 'skipped', detail: 'dry-run' };
   if (opts.noAutopilotInstall) return { name: 'install', status: 'skipped', detail: '--no-autopilot-install' };
   try {
-    execSync('gbrain autopilot --install --yes', { stdio: 'inherit', timeout: 60_000, env: process.env });
+    execSync(`${GBRAIN} autopilot --install --yes`, { stdio: 'inherit', timeout: 60_000, env: process.env });
     return { name: 'install', status: 'complete' };
   } catch (e) {
     // Install is best-effort — log but don't fail the whole migration. User

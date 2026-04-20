@@ -31,6 +31,13 @@
  */
 
 import { execSync } from 'child_process';
+
+import { gbrainSelfCmd } from './gbrain-self.ts';
+
+// Re-invoke the CURRENTLY-RUNNING gbrain CLI. `gbrain` off $PATH is unsafe
+// on bun-linked installs where process.execPath is the bun interpreter,
+// not the gbrain entry script. gbrainSelfCmd() builds `bun run <argv[1]>`.
+const GBRAIN = gbrainSelfCmd();
 import type { Migration, OrchestratorOpts, OrchestratorResult, OrchestratorPhaseResult } from './types.ts';
 import { appendCompletedMigration } from '../../core/preferences.ts';
 
@@ -42,7 +49,7 @@ function phaseASchema(opts: OrchestratorOpts): OrchestratorPhaseResult {
     // 10-minute budget. Migrations v8/v9 dedup with helper-index should be sub-second
     // even on 80K-duplicate brains, but the outer wall-clock cap shouldn't be the
     // failure mode (the prior 60s ceiling tripped Garry's production upgrade).
-    execSync('gbrain init --migrate-only', { stdio: 'inherit', timeout: 600_000, env: process.env });
+    execSync(`${GBRAIN} init --migrate-only`, { stdio: 'inherit', timeout: 600_000, env: process.env });
     return { name: 'schema', status: 'complete' };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -66,7 +73,7 @@ function phaseBConfigCheck(opts: OrchestratorOpts): OrchestratorPhaseResult & { 
   // Default behavior when unset = enabled (per isAutoLinkEnabled).
   let raw = '';
   try {
-    raw = execSync('gbrain config get auto_link', { encoding: 'utf-8', timeout: 10_000, env: process.env }).trim();
+    raw = execSync(`${GBRAIN} config get auto_link`, { encoding: 'utf-8', timeout: 10_000, env: process.env }).trim();
   } catch {
     // get exits non-zero when the key isn't set — that's fine, defaults to enabled.
     raw = '';
@@ -92,7 +99,7 @@ function phaseCBackfillLinks(opts: OrchestratorOpts): OrchestratorPhaseResult {
     // --source db is idempotent: the UNIQUE constraint on
     // (from_page_id, to_page_id, link_type) and ON CONFLICT DO NOTHING
     // make re-runs cheap. Empty brains return 0/0 quickly.
-    execSync('gbrain extract links --source db', { stdio: 'inherit', timeout: 600_000, env: process.env });
+    execSync(`${GBRAIN} extract links --source db`, { stdio: 'inherit', timeout: 600_000, env: process.env });
     return { name: 'backfill_links', status: 'complete' };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -103,7 +110,7 @@ function phaseCBackfillLinks(opts: OrchestratorOpts): OrchestratorPhaseResult {
 function phaseDBackfillTimeline(opts: OrchestratorOpts): OrchestratorPhaseResult {
   if (opts.dryRun) return { name: 'backfill_timeline', status: 'skipped', detail: 'dry-run' };
   try {
-    execSync('gbrain extract timeline --source db', { stdio: 'inherit', timeout: 600_000, env: process.env });
+    execSync(`${GBRAIN} extract timeline --source db`, { stdio: 'inherit', timeout: 600_000, env: process.env });
     return { name: 'backfill_timeline', status: 'complete' };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -121,7 +128,7 @@ interface StatsSnapshot {
 
 function readStats(): StatsSnapshot | null {
   try {
-    const out = execSync('gbrain get_stats --json 2>/dev/null || gbrain stats', {
+    const out = execSync(`${GBRAIN} get_stats --json 2>/dev/null || ${GBRAIN} stats`, {
       encoding: 'utf-8', timeout: 30_000, env: process.env,
     });
     // The fallback `gbrain stats` prints human-readable output; parse loosely.

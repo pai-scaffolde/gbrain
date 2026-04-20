@@ -28,6 +28,7 @@
 import { execSync } from 'child_process';
 import type { Migration, OrchestratorOpts, OrchestratorResult, OrchestratorPhaseResult } from './types.ts';
 import { appendCompletedMigration } from '../../core/preferences.ts';
+import { gbrainSelfCmd } from './gbrain-self.ts';
 
 // ── Phase A — Schema ────────────────────────────────────────
 //
@@ -35,12 +36,13 @@ import { appendCompletedMigration } from '../../core/preferences.ts';
 // and swaps the unique constraint. Schema build time on 46K pages is
 // ~10s (ALTER + index builds). Bumped timeout accounts for slow Supabase
 // links (v0.12.1 pattern — migrations can time out on the 60s default).
-// Use the CURRENTLY-RUNNING binary path (not `gbrain` off $PATH). After
-// `gbrain upgrade` rewrites the binary, a bare `gbrain` could resolve to
-// an older installed copy via alias shadowing or stale PATH cache. The
-// active process.execPath is the one that loaded THIS migration module,
-// so recursing into it is always the right binary.
-const GBRAIN = process.execPath;
+// Use the CURRENTLY-RUNNING binary (not `gbrain` off $PATH). After `gbrain
+// upgrade` rewrites the binary, a bare `gbrain` could resolve to an older
+// installed copy via alias shadowing or stale PATH cache. gbrainSelfCmd()
+// builds `bun run <argv[1]>` so it works for both direct `bun run src/cli.ts`
+// and bun-link installs where process.execPath is the bun interpreter rather
+// than the gbrain entry script.
+const GBRAIN = gbrainSelfCmd();
 
 function phaseASchema(opts: OrchestratorOpts): OrchestratorPhaseResult {
   if (opts.dryRun) return { name: 'schema', status: 'skipped', detail: 'dry-run' };
