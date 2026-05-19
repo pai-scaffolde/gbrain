@@ -877,7 +877,8 @@ export async function importCodeFile(
     .digest('hex');
 
   const existing = await engine.getPage(slug, sourceId ? { sourceId } : undefined);
-  if (!opts.force && existing?.content_hash === hash) {
+  const existingChunkerVersion = typeof (existing as any)?.chunker_version === 'number' ? (existing as any).chunker_version : null;
+  if (!opts.force && existing?.content_hash === hash && existingChunkerVersion === CHUNKER_VERSION) {
     return { slug, status: 'skipped', chunks: 0 };
   }
 
@@ -961,6 +962,10 @@ export async function importCodeFile(
       timeline: '',
       frontmatter: { language: lang, file: relativePath },
       content_hash: hash,
+      // Code pages need the same version/path stamps as markdown pages so
+      // doctor/reindex can tell which chunker shaped the persisted chunks.
+      chunker_version: CHUNKER_VERSION,
+      source_path: relativePath,
     }, txOpts);
 
     await tx.addTag(slug, 'code', txOpts);

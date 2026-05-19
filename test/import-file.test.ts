@@ -1,9 +1,10 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { writeFileSync, mkdirSync, rmSync, symlinkSync, readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { importFile, importFromContent } from '../src/core/import-file.ts';
+import { importFile, importFromContent, importCodeFile } from '../src/core/import-file.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
 import { MARKDOWN_CHUNKER_VERSION } from '../src/core/chunkers/recursive.ts';
+import { CHUNKER_VERSION } from '../src/core/chunkers/code.ts';
 
 const TMP = join(import.meta.dir, '.tmp-import-test');
 
@@ -503,6 +504,20 @@ Content.
     expect(putCall).toBeTruthy();
     expect(putCall.args[1].chunker_version).toBe(MARKDOWN_CHUNKER_VERSION);
     expect(putCall.args[1].source_path).toBe('concepts/cjk-source-path.md');
+  });
+
+  test('code imports stamp chunker_version + source_path for reindexability', async () => {
+    const engine = mockEngine({
+      getChunks: () => Promise.resolve([]),
+      deleteCodeEdgesForChunks: () => Promise.resolve(undefined),
+    });
+    const result = await importCodeFile(engine, 'src/example.ts', 'export function example() { return 1; }', { noEmbed: true });
+    expect(result.status).toBe('imported');
+    const putCall = (engine as any)._calls.find((c: any) => c.method === 'putPage');
+    expect(putCall).toBeTruthy();
+    expect(putCall.args[1].page_kind).toBe('code');
+    expect(putCall.args[1].chunker_version).toBe(CHUNKER_VERSION);
+    expect(putCall.args[1].source_path).toBe('src/example.ts');
   });
 });
 

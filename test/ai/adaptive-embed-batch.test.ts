@@ -84,6 +84,14 @@ function configureGoogle(): void {
   });
 }
 
+function configureOllama(): void {
+  configureGateway({
+    embedding_model: 'ollama:nomic-embed-text',
+    embedding_dimensions: 768,
+    env: {},
+  });
+}
+
 // --------- 1. Pure helpers ---------
 
 describe('splitByTokenBudget (pure helper)', () => {
@@ -170,6 +178,12 @@ describe('isTokenLimitError (pure helper)', () => {
     expect(isTokenLimitError(new Error('Exceeded 300000 max tokens per request'))).toBe(true);
   });
 
+  test('matches Ollama context-length variants', () => {
+    expect(isTokenLimitError(new Error('the input length exceeds the context length'))).toBe(true);
+    expect(isTokenLimitError(new Error('maximum context window exceeded'))).toBe(true);
+  });
+  });
+
   test('does not match unrelated errors', () => {
     expect(isTokenLimitError(new Error('Connection refused'))).toBe(false);
     expect(isTokenLimitError(new Error('Invalid API key'))).toBe(false);
@@ -231,6 +245,20 @@ describe('embed() recursion via stubbed transport', () => {
     // preservation despite the embeddings being concatenated from two calls.
     const slotZero = result.map(v => v[0]);
     expect(slotZero).toEqual([0, 1, 2, 3, 4, 0, 1, 2, 3, 4]);
+  });
+
+  test('Ollama pre-splits multi-chunk pages before local context-window rejection', async () => {
+    configureOllama();
+    const stub = mock(async ({ values }: { values: string[] }) => fakeEmbeddings(values, 768));
+    __setEmbedTransportForTests(stub as any);
+
+    await embed(['a'.repeat(1000), 'b'.repeat(1000), 'c'.repeat(1000)]);
+
+    // Ollama recipe budget: 2048 max_batch_tokens × 0.75 safety × 1 char/token
+    // = 1536 chars, so these chunks must be sent as separate calls instead of
+    // one large page-sized request that local Ollama rejects on context length.
+    expect(stub).toHaveBeenCalledTimes(3);
+    expect(stub.mock.calls.map(([arg]) => (arg as { values: string[] }).values.length)).toEqual([1, 1, 1]);
   });
 
   test('terminal case: single text always fails → normalizes and throws (no infinite loop)', async () => {

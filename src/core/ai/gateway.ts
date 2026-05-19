@@ -1367,7 +1367,11 @@ export function isTokenLimitError(err: unknown): boolean {
     /token.*limit.*exceeded/i.test(msg) ||
     // OpenAI embeddings: "Invalid 'input': maximum request size is 300000 tokens per request."
     /maximum request size.*tokens/i.test(msg) ||
-    /max.*tokens.*per.*request/i.test(msg)
+    /max.*tokens.*per.*request/i.test(msg) ||
+    // Ollama context-window errors (local embedding models enforce a context window)
+    /input\s+length\s+exceeds\s+the\s+context\s+length/i.test(msg) ||
+    /context\s+(length|window)/i.test(msg) ||
+    /maximum\s+context/i.test(msg)
   );
 }
 
