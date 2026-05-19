@@ -17,9 +17,14 @@ export const ollama: Recipe = {
       default_dims: 768, // nomic-embed-text native dim
       cost_per_1m_tokens_usd: 0,
       price_last_verified: '2026-04-20',
-      // Ollama's batch capacity depends on the locally loaded model + the
-      // OLLAMA_NUM_PARALLEL config; no static cap to declare. v0.32 (#779).
-      no_batch_cap: true,
+      // Ollama's exact batch capacity depends on the locally loaded model +
+      // OLLAMA_NUM_PARALLEL, but local embedding models still enforce a context
+      // window. Keep a conservative budget so multi-chunk pages are pre-split
+      // before the OpenAI-compatible endpoint rejects the request with
+      // "input length exceeds the context length".
+      max_batch_tokens: 2048,
+      chars_per_token: 1,
+      safety_factor: 0.75,
     },
   },
   setup_hint: 'Install Ollama from https://ollama.ai, then `ollama pull nomic-embed-text` and `ollama serve`.',

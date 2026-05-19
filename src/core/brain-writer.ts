@@ -282,6 +282,12 @@ export function writeBrainPage(
 interface SourceRow {
   id: string;
   local_path: string | null;
+  config?: unknown;
+}
+
+interface SourceConfig {
+  strategy?: 'markdown' | 'code' | 'auto';
+  syncEnabled?: boolean;
 }
 
 export interface ScanOpts {
@@ -309,6 +315,18 @@ export async function scanBrainSources(
   for (const src of sources) {
     if (opts.signal?.aborted) break;
     if (!src.local_path) continue;
+    const config = parseSourceConfig(src.config);
+    if (config.syncEnabled === false || config.strategy === 'code' || await isCodeOnlyIndexedSource(engine, src.id)) {
+      perSource.push({
+        source_id: src.id,
+        source_path: src.local_path,
+        total: 0,
+        errors_by_code: {},
+        sample: [],
+        ignoredMissingOpen: 0,
+      });
+      continue;
+    }
     if (!existsSync(src.local_path)) {
       // Source registered but path is missing on disk; surface as a zero-row
       // entry with a synthetic SCAN_PATH_MISSING note via warn-and-skip.
@@ -444,12 +462,50 @@ function walkDir(root: string, visit: (absPath: string) => boolean | void): void
 async function listSources(engine: BrainEngine, sourceId?: string): Promise<SourceRow[]> {
   if (sourceId) {
     const rows = await engine.executeRaw<SourceRow>(
-      `SELECT id, local_path FROM sources WHERE id = $1`,
+      `SELECT id, local_path, config FROM sources WHERE id = $1`,
       [sourceId],
     );
     return rows;
   }
   return engine.executeRaw<SourceRow>(
-    `SELECT id, local_path FROM sources WHERE local_path IS NOT NULL ORDER BY id`,
+    `SELECT id, local_path, config FROM sources WHERE local_path IS NOT NULL ORDER BY id`,
   );
+}
+
+function parseSourceConfig(raw: unknown): SourceConfig {
+  if (!raw) return {};
+  if (typeof raw === 'string') {
+    try {
+      return parseSourceConfig(JSON.parse(raw));
+    } catch {
+      return {};
+    }
+  }
+  if (typeof raw !== 'object') return {};
+  const cfg = raw as Record<string, unknown>;
+  const strategy = cfg.strategy === 'markdown' || cfg.strategy === 'code' || cfg.strategy === 'auto'
+    ? cfg.strategy
+    : undefined;
+  const syncEnabled = typeof cfg.syncEnabled === 'boolean' ? cfg.syncEnabled : undefined;
+  return { strategy, syncEnabled };
+}
+
+async function isCodeOnlyIndexedSource(engine: BrainEngine, sourceId: string): Promise<boolean> {
+  const rows = await engine.executeRaw<{ page_kind: string; count: string | number }>(
+    `SELECT page_kind, COUNT(*)::bigint AS count
+       FROM pages
+      WHERE source_id = $1
+        AND deleted_at IS NULL
+      GROUP BY page_kind`,
+    [sourceId],
+  );
+  if (!rows.length) return false;
+  let code = 0;
+  let nonCode = 0;
+  for (const row of rows) {
+    const count = typeof row.count === 'number' ? row.count : Number(row.count || 0);
+    if (row.page_kind === 'code') code += count;
+    else nonCode += count;
+  }
+  return code > 0 && nonCode === 0;
 }

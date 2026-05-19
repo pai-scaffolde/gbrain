@@ -106,7 +106,18 @@ import G_ZIG from '../../assets/wasm/grammars/tree-sitter-zig.wasm' with { type:
 // chunks get the new columns populated. Without this, the v28 backfill
 // gives every existing chunk a search_vector but subsequent Layer 5 AST
 // work would silently no-op.
-export const CHUNKER_VERSION = 4;
+// v5 (v0.36.3.1): enforce an embedding-safe final cap on all code chunks.
+// Semantic AST chunks can otherwise emit a single large nested method/object
+// literal that local embedding providers reject for context length. Bump forces
+// code sources to re-walk and replace stale oversized chunks on next sync.
+export const CHUNKER_VERSION = 6;
+
+// Conservative provider-agnostic cap for a single code embedding input. This is
+// deliberately below common 2k-token local embedding contexts because the final
+// chunk includes a structured header and provider tokenizers differ from
+// cl100k_base. Callers may lower/raise via CodeChunkOptions for tests or custom
+// deployments, but default imports must not persist unembeddable jumbo chunks.
+export const CODE_EMBED_MAX_TOKENS = 700;
 
 // Lazy-loaded tree-sitter module (v0.22.x API: Parser is default export)
 let Parser: typeof import('web-tree-sitter') | null = null;
@@ -163,6 +174,7 @@ export interface CodeChunkOptions {
   largeChunkThresholdTokens?: number;
   fallbackChunkSizeWords?: number;
   fallbackOverlapWords?: number;
+  embeddingMaxTokens?: number;
 }
 
 /**
@@ -689,7 +701,11 @@ export async function chunkCodeTextFull(
     if (chunks.length === 0) {
       return { chunks: fallbackChunks(source, filePath, language, opts), edges: rawEdges };
     }
-    return { chunks: mergeSmallSiblings(chunks, chunkTarget), edges: rawEdges };
+    const merged = mergeSmallSiblings(chunks, chunkTarget);
+    return {
+      chunks: enforceCodeChunkEmbeddingCap(merged, opts.embeddingMaxTokens ?? CODE_EMBED_MAX_TOKENS),
+      edges: rawEdges,
+    };
   } catch {
     return { chunks: fallbackChunks(source, filePath, language, opts), edges: [] };
   } finally {
@@ -795,6 +811,142 @@ function buildMergedChunk(group: CodeChunk[], index: number): CodeChunk {
   };
 }
 
+function enforceCodeChunkEmbeddingCap(chunks: CodeChunk[], maxTokens: number): CodeChunk[] {
+  if (!Number.isFinite(maxTokens) || maxTokens <= 0) {
+    return chunks.map((chunk, index) => ({ ...chunk, index }));
+  }
+  const capped: CodeChunk[] = [];
+  for (const chunk of chunks) {
+    if (estimateTokens(chunk.text) <= maxTokens) {
+      capped.push({ ...chunk, index: capped.length });
+      continue;
+    }
+    for (const part of splitOversizedCodeChunk(chunk, maxTokens)) {
+      capped.push({ ...part, index: capped.length });
+    }
+  }
+  return capped;
+}
+
+function splitOversizedCodeChunk(chunk: CodeChunk, maxTokens: number): CodeChunk[] {
+  const body = chunk.text.replace(/^\[[^\]]+\] [^\n]+\n\n/, '');
+  const lines = body.split('\n');
+  const parts: { body: string; startLine: number; endLine: number }[] = [];
+  let current: string[] = [];
+  let currentTokens = 0;
+  let currentStartLine = chunk.metadata.startLine;
+
+  const headerTokenOverhead = (startLine: number, endLine: number) => estimateTokens(buildChunk({
+    body: '',
+    filePath: chunk.metadata.filePath,
+    language: chunk.metadata.language,
+    symbolName: chunk.metadata.symbolName,
+    symbolType: chunk.metadata.symbolType,
+    startLine,
+    endLine,
+    index: 0,
+    parentSymbolPath: chunk.metadata.parentSymbolPath ?? [],
+  }).text);
+
+  const flush = (endLine: number) => {
+    if (current.length === 0) return;
+    parts.push({ body: current.join('\n'), startLine: currentStartLine, endLine: Math.max(currentStartLine, endLine) });
+    current = [];
+    currentTokens = 0;
+  };
+
+  lines.forEach((line, offset) => {
+    const lineNo = chunk.metadata.startLine + offset;
+    const lineTokens = estimateTokens(line) + 1; // newline separator buffer
+    const overhead = headerTokenOverhead(currentStartLine, lineNo);
+    if (current.length > 0 && overhead + currentTokens + lineTokens > maxTokens) {
+      flush(lineNo - 1);
+      currentStartLine = lineNo;
+    }
+
+    const singleOverhead = headerTokenOverhead(lineNo, lineNo);
+    if (singleOverhead + lineTokens <= maxTokens) {
+      current.push(line);
+      currentTokens += lineTokens;
+      return;
+    }
+
+    flush(lineNo - 1);
+    for (const segment of splitLongLineForTokenCap(line, chunk, lineNo, maxTokens)) {
+      parts.push(segment);
+    }
+    currentStartLine = lineNo + 1;
+  });
+  flush(chunk.metadata.startLine + lines.length - 1);
+
+  return parts.flatMap((part, i) => {
+    const built = buildChunk({
+      body: part.body,
+      filePath: chunk.metadata.filePath,
+      language: chunk.metadata.language,
+      symbolName: chunk.metadata.symbolName,
+      symbolType: chunk.metadata.symbolType,
+      startLine: part.startLine,
+      endLine: part.endLine,
+      index: i,
+      parentSymbolPath: chunk.metadata.parentSymbolPath ?? [],
+    });
+    if (estimateTokens(built.text) <= maxTokens || !part.body.includes('\n')) return [built];
+    return part.body.split('\n').flatMap((line, lineOffset) =>
+      splitLongLineForTokenCap(line, chunk, part.startLine + lineOffset, maxTokens).map((segment, segmentIndex) => buildChunk({
+        body: segment.body,
+        filePath: chunk.metadata.filePath,
+        language: chunk.metadata.language,
+        symbolName: chunk.metadata.symbolName,
+        symbolType: chunk.metadata.symbolType,
+        startLine: segment.startLine,
+        endLine: segment.endLine,
+        index: segmentIndex,
+        parentSymbolPath: chunk.metadata.parentSymbolPath ?? [],
+      })),
+    );
+  });
+}
+
+function splitLongLineForTokenCap(
+  line: string,
+  chunk: CodeChunk,
+  lineNo: number,
+  maxTokens: number,
+): { body: string; startLine: number; endLine: number }[] {
+  const parts: { body: string; startLine: number; endLine: number }[] = [];
+  let remaining = line;
+  while (remaining.length > 0) {
+    let lo = 1;
+    let hi = remaining.length;
+    let best = 1;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const body = remaining.slice(0, mid);
+      const candidate = buildChunk({
+        body,
+        filePath: chunk.metadata.filePath,
+        language: chunk.metadata.language,
+        symbolName: chunk.metadata.symbolName,
+        symbolType: chunk.metadata.symbolType,
+        startLine: lineNo,
+        endLine: lineNo,
+        index: 0,
+        parentSymbolPath: chunk.metadata.parentSymbolPath ?? [],
+      });
+      if (estimateTokens(candidate.text) <= maxTokens) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    parts.push({ body: remaining.slice(0, best), startLine: lineNo, endLine: lineNo });
+    remaining = remaining.slice(best);
+  }
+  return parts;
+}
+
 // ---------- Internals ----------
 
 function fallbackChunks(
@@ -805,7 +957,7 @@ function fallbackChunks(
 ): CodeChunk[] {
   const size = opts.fallbackChunkSizeWords ?? 300;
   const overlap = opts.fallbackOverlapWords ?? 50;
-  return recursiveChunk(source, { chunkSize: size, chunkOverlap: overlap }).map((chunk, index) =>
+  const chunks = recursiveChunk(source, { chunkSize: size, chunkOverlap: overlap }).map((chunk, index) =>
     buildChunk({
       body: chunk.text, filePath, language,
       symbolName: null, symbolType: 'module',
@@ -813,6 +965,7 @@ function fallbackChunks(
       index,
     }),
   );
+  return enforceCodeChunkEmbeddingCap(chunks, opts.embeddingMaxTokens ?? CODE_EMBED_MAX_TOKENS);
 }
 
 function buildChunk(input: {

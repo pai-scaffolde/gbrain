@@ -25,7 +25,7 @@
 
 import type { BrainEngine } from '../core/engine.ts';
 import { importCodeFile } from '../core/import-file.ts';
-import { estimateTokens } from '../core/chunkers/code.ts';
+import { CHUNKER_VERSION, estimateTokens } from '../core/chunkers/code.ts';
 import { EMBEDDING_MODEL, estimateEmbeddingCostUsd } from '../core/embedding.ts';
 import { errorFor, serializeError } from '../core/errors.ts';
 import { createInterface } from 'readline';
@@ -66,24 +66,27 @@ async function fetchCodePages(
   sourceId: string | undefined,
   batchSize: number,
   offset: number,
+  opts: { force?: boolean } = {},
 ): Promise<CodePageRow[]> {
   // Direct SQL: listPages doesn't expose source_id filtering, and we need
   // compiled_truth + frontmatter anyway (not just the Page shape).
   const sourceClause = sourceId ? `AND p.source_id = '${sourceId.replace(/'/g, "''")}'` : '';
+  const staleClause = opts.force ? '' : `AND COALESCE(p.chunker_version, 0) <> ${CHUNKER_VERSION}`;
   const rows = await engine.executeRaw<CodePageRow>(
     `SELECT p.slug, p.compiled_truth, p.frontmatter
      FROM pages p
-     WHERE p.type = 'code' ${sourceClause}
+     WHERE p.type = 'code' ${sourceClause} ${staleClause}
      ORDER BY p.slug
      LIMIT ${batchSize} OFFSET ${offset}`,
   );
   return rows;
 }
 
-async function countCodePages(engine: BrainEngine, sourceId: string | undefined): Promise<number> {
+async function countCodePages(engine: BrainEngine, sourceId: string | undefined, opts: { force?: boolean } = {}): Promise<number> {
   const sourceClause = sourceId ? `AND p.source_id = '${sourceId.replace(/'/g, "''")}'` : '';
+  const staleClause = opts.force ? '' : `AND COALESCE(p.chunker_version, 0) <> ${CHUNKER_VERSION}`;
   const rows = await engine.executeRaw<{ n: string | number }>(
-    `SELECT COUNT(*)::text AS n FROM pages p WHERE p.type = 'code' ${sourceClause}`,
+    `SELECT COUNT(*)::text AS n FROM pages p WHERE p.type = 'code' ${sourceClause} ${staleClause}`,
   );
   if (rows.length === 0) return 0;
   const raw = rows[0]!.n;
@@ -100,12 +103,13 @@ async function estimateReindexCost(
   engine: BrainEngine,
   sourceId: string | undefined,
   batchSize: number,
+  opts: { force?: boolean } = {},
 ): Promise<{ totalTokens: number; totalPages: number }> {
   let totalTokens = 0;
   let totalPages = 0;
   let offset = 0;
   while (true) {
-    const batch = await fetchCodePages(engine, sourceId, batchSize, offset);
+    const batch = await fetchCodePages(engine, sourceId, batchSize, offset, opts);
     if (batch.length === 0) break;
     for (const row of batch) {
       if (row.compiled_truth) totalTokens += estimateTokens(row.compiled_truth);
@@ -135,7 +139,7 @@ export async function runReindexCode(
 ): Promise<ReindexCodeResult> {
   const batchSize = opts.batchSize ?? 100;
 
-  const { totalTokens, totalPages } = await estimateReindexCost(engine, opts.sourceId, batchSize);
+  const { totalTokens, totalPages } = await estimateReindexCost(engine, opts.sourceId, batchSize, { force: opts.force });
   const costUsd = estimateEmbeddingCostUsd(totalTokens);
 
   if (opts.dryRun) {
@@ -178,7 +182,7 @@ export async function runReindexCode(
 
   try {
     while (true) {
-      const batch = await fetchCodePages(engine, opts.sourceId, batchSize, offset);
+      const batch = await fetchCodePages(engine, opts.sourceId, batchSize, offset, { force: opts.force });
       if (batch.length === 0) break;
 
       for (const row of batch) {
@@ -215,7 +219,9 @@ export async function runReindexCode(
         reporter.tick();
       }
 
-      offset += batch.length;
+      if (opts.force) {
+        offset += batch.length;
+      }
       if (batch.length < batchSize) break;
     }
   } finally {

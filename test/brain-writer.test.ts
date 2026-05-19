@@ -156,11 +156,11 @@ describe('scanBrainSources (PGLite)', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  async function registerSource(id: string, path: string) {
+  async function registerSource(id: string, path: string, config: Record<string, unknown> = {}) {
     await engine.executeRaw(
-      `INSERT INTO sources (id, name, local_path) VALUES ($1, $1, $2)
-         ON CONFLICT (id) DO UPDATE SET local_path = EXCLUDED.local_path`,
-      [id, path],
+      `INSERT INTO sources (id, name, local_path, config) VALUES ($1, $1, $2, $3::jsonb)
+         ON CONFLICT (id) DO UPDATE SET local_path = EXCLUDED.local_path, config = EXCLUDED.config`,
+      [id, path, JSON.stringify(config)],
     );
   }
 
@@ -213,6 +213,63 @@ describe('scanBrainSources (PGLite)', () => {
     const report = await scanBrainSources(engine);
     const ghost = report.per_source.find(s => s.source_id === 'ghost')!;
     expect(ghost.total).toBe(0);
+  });
+
+  test('skips code-strategy sources instead of validating repo markdown as brain pages', async () => {
+    const src = join(tmp, 'code');
+    mkdirSync(join(src, 'docs'), { recursive: true });
+    writeFileSync(join(src, 'docs', 'bad.md'), `${fence}\ntype: x\ntitle: "P "I" L"\n${fence}\n\nrepo docs`);
+    writeFileSync(join(src, 'src.ts'), 'export const ok = 1;');
+    await registerSource('code-src', src, { strategy: 'code' });
+
+    const report = await scanBrainSources(engine);
+    const code = report.per_source.find(s => s.source_id === 'code-src')!;
+    expect(code).toBeDefined();
+    expect(code.total).toBe(0);
+    expect(report.total).toBe(0);
+  });
+
+  test('skips sources inferred as code-only from indexed page_kind rows', async () => {
+    const src = join(tmp, 'indexed-code');
+    mkdirSync(join(src, 'docs'), { recursive: true });
+    writeFileSync(join(src, 'docs', 'bad.md'), `${fence}\ntype: x\ntitle: "P "I" L"\n${fence}\n\nrepo docs`);
+    await registerSource('indexed-code-src', src);
+    await engine.executeRaw(
+      `INSERT INTO pages (source_id, slug, type, title, compiled_truth, page_kind, source_path)
+       VALUES ('indexed-code-src', 'indexed-code-src/src/file.ts', 'code', 'file.ts', 'export const ok = 1;', 'code', 'src/file.ts')`,
+    );
+
+    const report = await scanBrainSources(engine);
+    const code = report.per_source.find(s => s.source_id === 'indexed-code-src')!;
+    expect(code).toBeDefined();
+    expect(code.total).toBe(0);
+    expect(report.total).toBe(0);
+  });
+
+  test('still validates markdown-strategy sources', async () => {
+    const src = join(tmp, 'markdown');
+    mkdirSync(src, { recursive: true });
+    writeFileSync(join(src, 'bad.md'), `${fence}\ntype: x\ntitle: "P "I" L"\n${fence}\n\nbrain page`);
+    await registerSource('markdown-src', src, { strategy: 'markdown' });
+
+    const report = await scanBrainSources(engine);
+    const markdown = report.per_source.find(s => s.source_id === 'markdown-src')!;
+    expect(markdown.total).toBeGreaterThan(0);
+    expect(markdown.errors_by_code.NESTED_QUOTES).toBeGreaterThanOrEqual(1);
+  });
+
+  test('auto-strategy validates markdown but does not parse code files as markdown', async () => {
+    const src = join(tmp, 'auto');
+    mkdirSync(src, { recursive: true });
+    writeFileSync(join(src, 'bad.md'), `${fence}\ntype: x\ntitle: "P "I" L"\n${fence}\n\nauto markdown`);
+    writeFileSync(join(src, 'bad.ts'), `${fence}\nthis is TypeScript, not YAML\n${fence}\nexport const ok = 1;`);
+    await registerSource('auto-src', src, { strategy: 'auto' });
+
+    const report = await scanBrainSources(engine);
+    const auto = report.per_source.find(s => s.source_id === 'auto-src')!;
+    expect(auto.total).toBeGreaterThan(0);
+    expect(auto.sample.some(s => s.path === 'bad.md')).toBe(true);
+    expect(auto.sample.some(s => s.path === 'bad.ts')).toBe(false);
   });
 
   test('skips symlinks (matches sync no-symlink policy)', async () => {

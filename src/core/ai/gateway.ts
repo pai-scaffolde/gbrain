@@ -1171,7 +1171,10 @@ export function isTokenLimitError(err: unknown): boolean {
   return (
     /max.*allowed.*tokens.*batch/i.test(msg) ||
     /batch.*too.*many.*tokens/i.test(msg) ||
-    /token.*limit.*exceeded/i.test(msg)
+    /token.*limit.*exceeded/i.test(msg) ||
+    /input\s+length\s+exceeds\s+the\s+context\s+length/i.test(msg) ||
+    /context\s+(length|window)/i.test(msg) ||
+    /maximum\s+context/i.test(msg)
   );
 }
 

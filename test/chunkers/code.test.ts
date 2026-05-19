@@ -7,11 +7,11 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { chunkCodeText, detectCodeLanguage, CHUNKER_VERSION } from '../../src/core/chunkers/code.ts';
+import { chunkCodeText, detectCodeLanguage, CHUNKER_VERSION, CODE_EMBED_MAX_TOKENS, estimateTokens } from '../../src/core/chunkers/code.ts';
 
 describe('CHUNKER_VERSION', () => {
-  test('v0.20.0 Cathedral II Layer 12 bumped to 4', () => {
-    expect(CHUNKER_VERSION).toBe(4);
+  test('embedding-safe code chunk cap bumped to 6 for local Ollama context safety', () => {
+    expect(CHUNKER_VERSION).toBe(6);
   });
 });
 
@@ -241,6 +241,36 @@ describe('chunkCodeText — structured header', () => {
     const first = result[0]!;
     expect(first.text).toMatch(/^\[TypeScript\] src\/lib\/foo\.ts:\d+-\d+ /);
     expect(first.text).toContain('myFunc');
+  });
+});
+
+describe('chunkCodeText — embedding-safe cap', () => {
+  test('splits oversized nested method chunks below the default embedding cap', async () => {
+    const statements = Array.from({ length: 2600 }, (_, i) => `    total += ${i};`).join('\n');
+    const src = `export class Giant {
+  run(): number {
+    let total = 0;
+${statements}
+    return total;
+  }
+}`;
+    const result = await chunkCodeText(src, 'giant.ts');
+    expect(result.length).toBeGreaterThan(1);
+    for (const chunk of result) {
+      expect(estimateTokens(chunk.text)).toBeLessThanOrEqual(CODE_EMBED_MAX_TOKENS);
+    }
+  });
+
+  test('splits a single huge line that cannot be divided on line boundaries', async () => {
+    const payload = 'x'.repeat(16_000);
+    const src = `export function giantLiteral() {
+  return "${payload}";
+}`;
+    const result = await chunkCodeText(src, 'literal.ts');
+    expect(result.length).toBeGreaterThan(1);
+    for (const chunk of result) {
+      expect(estimateTokens(chunk.text)).toBeLessThanOrEqual(CODE_EMBED_MAX_TOKENS);
+    }
   });
 });
 
