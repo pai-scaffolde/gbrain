@@ -24,17 +24,25 @@
  *    the FS walk into one array, then run ONE SELECT against pages with a
  *    VALUES clause. NOT a per-file loop (which would be 20K round trips on
  *    a 10K-file source).
- *  - Time + size bounds: cap the walk at 10K files OR 5s. Bail with a "check
- *    skipped, walk too large" status instead of letting doctor hang.
+ *  - Descent pruning (SCA-3773): the walk applies the canonical `pruneDir`
+ *    gate from sync.ts, skipping `node_modules`/`vendor`/`dist`/`build`/`venv`/
+ *    `ops`/`.raw`/dot-dirs/submodules. Pre-fix the walk descended these (none
+ *    are dot-prefixed) and routinely blew the budget on a working-repo source,
+ *    so the check reported `walk_truncated` and SILENTLY SKIPPED. Pruning keeps
+ *    the candidate set equal to what sync indexes and cuts walk time ~11x.
+ *  - Time + size bounds: cap the walk at GBRAIN_DRIFT_LIMIT files (default 50K)
+ *    OR GBRAIN_DRIFT_TIMEOUT_MS (default 15s). Both are env-tunable so dataset
+ *    growth doesn't reintroduce the skip. Bail with a "check skipped, walk too
+ *    large" status instead of letting doctor hang.
  *  - Wrapper try/catch around the walk per OV13: ENOENT/EACCES on local_path
  *    yields zero files, NOT a thrown crash that takes down the whole doctor
  *    run.
  */
 
-import { readdirSync, lstatSync, statSync } from 'fs';
+import { readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
 import type { BrainEngine } from './engine.ts';
-import { pathToSlug } from './sync.ts';
+import { pathToSlug, pruneDir } from './sync.ts';
 
 export interface SourceWithPath {
   id: string;
@@ -55,9 +63,62 @@ export interface MisroutedResult {
   sample: MisroutedSample[];
 }
 
-const DEFAULT_FILE_LIMIT = 10_000;
-const DEFAULT_TIMEOUT_MS = 5_000;
+// SCA-3773: v0.31.8 shipped a 5s / 10K-file budget. On a real multi-source
+// brain this skipped two ways, both leaving drift detection blind:
+//
+//   1. File-count cap too low. A brain that ingests transcript/learning
+//      history accumulates well past 10K markdown files in a single source
+//      (the live brain that surfaced this had 13.5K transcript files in one
+//      source). The walk itself is fast — 13.5K files cross-checked in <300ms
+//      — so the time bound was never the binding constraint; the 10K *count*
+//      cap was. The count cap exists only to bound memory + the DB VALUES
+//      probe, so it's raised to 50K (one source needs >65K files to approach
+//      Postgres's bind-param ceiling). The 15s timeout remains the real
+//      hang-guard.
+//   2. node_modules/vendor/dist not pruned. When a source `local_path` points
+//      at a working repo, the dotfile-only skip missed these (none are
+//      dot-prefixed), so the walk descended dependency trees that sync never
+//      indexes — burning the budget and inflating the count toward the cap.
+//      The walk now applies the canonical `pruneDir` gate (below).
+//
+// Both bounds are tunable via GBRAIN_DRIFT_LIMIT / GBRAIN_DRIFT_TIMEOUT_MS —
+// pre-fix those env vars were named in the doctor warning but never read.
+const DEFAULT_FILE_LIMIT = 50_000;
+const DEFAULT_TIMEOUT_MS = 15_000;
 const SAMPLE_LIMIT = 5;
+
+let _driftEnvWarned = false;
+
+/**
+ * Resolve a positive-integer drift bound from an env var, falling back to
+ * `fallback` (with a once-per-process stderr warning) when the value is unset,
+ * non-numeric, or non-positive. Mirrors `_resolveSyncFreshnessHours` in
+ * doctor.ts so the two tunable doctor checks behave identically.
+ */
+function _resolveDriftBound(envName: string, raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    if (!_driftEnvWarned) {
+      _driftEnvWarned = true;
+      process.stderr.write(
+        `[gbrain] ${envName}="${raw}" is not a positive number; using default ${fallback}.\n`,
+      );
+    }
+    return fallback;
+  }
+  return Math.floor(n);
+}
+
+/** Env-var-tunable file-count cap for the drift FS walk. */
+export function resolveDriftLimit(env: NodeJS.ProcessEnv = process.env): number {
+  return _resolveDriftBound('GBRAIN_DRIFT_LIMIT', env.GBRAIN_DRIFT_LIMIT, DEFAULT_FILE_LIMIT);
+}
+
+/** Env-var-tunable wall-clock budget (ms) for the drift FS walk. */
+export function resolveDriftTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  return _resolveDriftBound('GBRAIN_DRIFT_TIMEOUT_MS', env.GBRAIN_DRIFT_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
+}
 
 /**
  * Walk a directory tree for `.md` + `.mdx` files. Skips dotfiles (`.git`),
@@ -77,31 +138,39 @@ function walkMarkdownAndMdxFiles(
   let truncated = false;
   function walk(d: string): void {
     if (truncated) return;
-    let entries: string[];
+    let entries: import('fs').Dirent[];
     try {
-      entries = readdirSync(d);
+      // `withFileTypes` returns the entry's type from the single readdir
+      // syscall, eliminating the per-entry `lstatSync` the pre-SCA-3773 walk
+      // paid on every file and directory.
+      entries = readdirSync(d, { withFileTypes: true });
     } catch {
       // Unreadable directory; skip without crashing the whole walk.
       return;
     }
     for (const entry of entries) {
       if (truncated) return;
-      if (entry.startsWith('.')) continue;
-      const full = join(d, entry);
-      let isDir = false;
-      try {
-        isDir = lstatSync(full).isDirectory();
-      } catch {
+      const name = entry.name;
+      if (name.startsWith('.')) continue;
+      // Dirent.isDirectory() does NOT follow symlinks (same semantics as the
+      // old lstatSync().isDirectory()), so symlinked dirs are treated as files
+      // and only indexed if they match the markdown extension — behavior
+      // preserved from v0.31.8.
+      if (entry.isDirectory()) {
+        // Apply the canonical sync prune gate so the drift walk considers
+        // exactly the files the sync walker indexes: skip `node_modules`,
+        // `vendor`, `dist`, `build`, `venv`, `ops`, `.raw`, dot-dirs, and git
+        // submodules. This is both the perf fix (these trees dominate walk
+        // time on a working-repo source) and a correctness alignment — a file
+        // sync never ingests can't be a real drift candidate (SCA-3773).
+        if (!pruneDir(name, d)) continue;
+        walk(join(d, name));
         continue;
       }
-      if (isDir) {
-        walk(full);
-        continue;
-      }
-      const isMd = entry.endsWith('.md') || entry.endsWith('.mdx');
+      const isMd = name.endsWith('.md') || name.endsWith('.mdx');
       if (!isMd) continue;
-      if (entry.startsWith('_')) continue; // matches extract.ts convention
-      files.push({ relPath: relative(root, full) });
+      if (name.startsWith('_')) continue; // matches extract.ts convention
+      files.push({ relPath: relative(root, join(d, name)) });
       if (files.length >= limit) {
         truncated = true;
         return;
@@ -177,8 +246,11 @@ export async function findMisroutedPages(
   sources: SourceWithPath[],
   opts: { limit?: number; timeoutMs?: number } = {},
 ): Promise<MisroutedResult> {
-  const limit = opts.limit ?? DEFAULT_FILE_LIMIT;
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  // Explicit opts (tests) win; otherwise honor the documented env-var levers
+  // GBRAIN_DRIFT_LIMIT / GBRAIN_DRIFT_TIMEOUT_MS (pre-SCA-3773 these were named
+  // in the doctor warning but never actually read — the lever was a dead end).
+  const limit = opts.limit ?? resolveDriftLimit();
+  const timeoutMs = opts.timeoutMs ?? resolveDriftTimeoutMs();
   const deadlineMs = Date.now() + timeoutMs;
 
   let totalCount = 0;
