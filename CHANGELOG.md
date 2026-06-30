@@ -2,6 +2,21 @@
 
 All notable changes to GBrain will be documented in this file.
 
+## [0.42.52.0] - 2026-06-30
+
+**`gbrain doctor`'s `multi_source_drift` check now actually runs on a real multi-source brain instead of silently skipping itself.** The check walks each non-default source's filesystem to find pages that drifted to `default`, but on any brain of normal size it hit its walk budget and reported "check skipped, walk too large" — drift detection had a blind spot that read as healthy. Worse, the warning told operators to tune `GBRAIN_DRIFT_LIMIT` / `GBRAIN_DRIFT_TIMEOUT_MS`, but those env vars were never read, so the documented fix did nothing.
+
+Two root causes, both fixed:
+- **The 10K file-count cap was too low.** A brain that ingests transcript/learning history accumulates well past 10K markdown files in a single source — the brain that surfaced this had 13.5K transcript files in one source. The walk itself is fast (13.5K files cross-checked in under 300ms), so the time bound was never the constraint; the count cap was. It is raised to 50K. The 15s timeout remains the real hang-guard.
+- **`node_modules`/`vendor`/`dist` were never pruned.** When a source `local_path` points at a working repo, the dotfile-only skip missed these dependency trees (none are dot-prefixed), so the walk descended files sync never indexes — burning the budget and inflating the count. The walk now applies the canonical `pruneDir` gate from `sync.ts`, so it considers exactly the files sync ingests. On the affected brain this cut the `scaffolde-ai` source walk from ~7.8s to ~0.14s.
+
+### Fixed
+- **`GBRAIN_DRIFT_LIMIT` / `GBRAIN_DRIFT_TIMEOUT_MS` are now honored.** Pre-fix they appeared only in the doctor warning string and a comment — the walk always used the hardcoded defaults, so the documented tuning lever was a dead end. `findMisroutedPages` now resolves both from the environment (explicit call-site `opts` still win, for tests), with invalid/non-positive values falling back to the default and a once-per-process stderr warning — mirroring `sync_freshness`'s `_resolveSyncFreshnessHours`.
+- **The drift FS walk drops the per-entry `lstatSync`.** It now reads directory entries with `withFileTypes: true`, getting each entry's type from the single `readdirSync` syscall instead of an extra `lstat` per file. Symlink-following semantics are unchanged (`Dirent.isDirectory()` does not follow symlinks, matching the old `lstatSync().isDirectory()`).
+
+### Changed
+- **`multi_source_drift` default walk budget: 10K files → 50K files** (timeout unchanged at 15s; SCA-3773). Tune via `GBRAIN_DRIFT_LIMIT` / `GBRAIN_DRIFT_TIMEOUT_MS` if a source grows past 50K markdown files.
+
 ## [0.42.51.0] - 2026-06-17
 
 **`gbrain sync` stops bottlenecking all its workers on a single database row, a malformed checkpoint can no longer wedge a source, and `gbrain doctor` tells an actively-running sync apart from a stuck one.** A slow source that fell behind HEAD could read as permanently stale even while it imported every cycle: sync was single-core-bound at the database layer, so handing it more workers didn't help, and the freshness check couldn't see that a sync was in fact running.

@@ -22,7 +22,11 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { runSources } from '../src/commands/sources.ts';
-import { findMisroutedPages } from '../src/core/multi-source-drift.ts';
+import {
+  findMisroutedPages,
+  resolveDriftLimit,
+  resolveDriftTimeoutMs,
+} from '../src/core/multi-source-drift.ts';
 
 let engine: PGLiteEngine;
 const TMP_ROOTS: string[] = [];
@@ -170,5 +174,66 @@ describe('findMisroutedPages — heuristic correctness', () => {
     const result = await findMisroutedPages(engine, [{ id: 'src-case7', local_path: root }]);
     expect(result.count).toBe(1);
     expect(result.sample[0].slug).toBe('topics/mdx-page');
+  });
+});
+
+describe('SCA-3773 — walk pruning + env-var tunable bounds', () => {
+  test('case 8: node_modules / vendor / dist subtrees are pruned, not counted as drift', async () => {
+    const root = makeTmpRoot('case8');
+    // A real, hand-authored page that IS a misroute (present at default only).
+    seedFile(root, 'people/erin.md');
+    // Pollution the pre-fix walk would have descended (none are dot-prefixed),
+    // each carrying a slug that ALSO sits at (default, slug). If pruning fails
+    // these would inflate the drift count and could re-skip the whole check.
+    seedFile(root, 'node_modules/pkg/readme.md');
+    seedFile(root, 'vendor/lib/doc.md');
+    seedFile(root, 'dist/bundle.md');
+    seedFile(root, 'build/output.md');
+
+    await runSources(engine, ['add', 'src-case8', '--no-federated']);
+    await engine.executeRaw(
+      `UPDATE sources SET local_path = $1 WHERE id = $2`,
+      [root, 'src-case8'],
+    );
+    // Misroute EVERY slug into default (the drift shape). Only erin should be
+    // reported — the pruned ones must never reach the DB probe.
+    await engine.putPage('people/erin',          { type: 'person',  title: 'Erin', compiled_truth: '.' });
+    await engine.putPage('node_modules/pkg/readme', { type: 'concept', title: 'nm',  compiled_truth: '.' });
+    await engine.putPage('vendor/lib/doc',       { type: 'concept', title: 'v',    compiled_truth: '.' });
+    await engine.putPage('dist/bundle',          { type: 'concept', title: 'd',    compiled_truth: '.' });
+    await engine.putPage('build/output',         { type: 'concept', title: 'b',    compiled_truth: '.' });
+
+    const result = await findMisroutedPages(engine, [{ id: 'src-case8', local_path: root }]);
+    expect(result.walk_truncated).toBe(false);
+    expect(result.count).toBe(1);
+    expect(result.sample.map(s => s.slug)).toEqual(['people/erin']);
+  });
+
+  test('case 9: GBRAIN_DRIFT_LIMIT env var is honored when opts omit limit', async () => {
+    const root = makeTmpRoot('case9');
+    for (let i = 0; i < 8; i++) seedFile(root, `topics/env-${i}.md`);
+
+    const prev = process.env.GBRAIN_DRIFT_LIMIT;
+    process.env.GBRAIN_DRIFT_LIMIT = '3';
+    try {
+      // No `limit` opt → env var supplies it. 8 files > 3 → truncates.
+      const result = await findMisroutedPages(engine, [{ id: 'src-case9-fake', local_path: root }]);
+      expect(result.walk_truncated).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.GBRAIN_DRIFT_LIMIT;
+      else process.env.GBRAIN_DRIFT_LIMIT = prev;
+    }
+  });
+
+  test('case 10: resolveDriftLimit / resolveDriftTimeoutMs parse env, fall back on garbage', () => {
+    expect(resolveDriftLimit({ GBRAIN_DRIFT_LIMIT: '250' } as never)).toBe(250);
+    expect(resolveDriftTimeoutMs({ GBRAIN_DRIFT_TIMEOUT_MS: '42000' } as never)).toBe(42000);
+    // Unset → defaults (50K files / 15s).
+    expect(resolveDriftLimit({} as never)).toBe(50_000);
+    expect(resolveDriftTimeoutMs({} as never)).toBe(15_000);
+    // Non-numeric / non-positive → defaults (no throw).
+    expect(resolveDriftLimit({ GBRAIN_DRIFT_LIMIT: 'lots' } as never)).toBe(50_000);
+    expect(resolveDriftLimit({ GBRAIN_DRIFT_LIMIT: '0' } as never)).toBe(50_000);
+    expect(resolveDriftTimeoutMs({ GBRAIN_DRIFT_TIMEOUT_MS: '-5' } as never)).toBe(15_000);
   });
 });
